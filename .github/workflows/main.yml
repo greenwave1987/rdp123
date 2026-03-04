@@ -47,7 +47,7 @@ jobs:
           $password = -join ($rawPassword | Sort-Object { Get-Random })
           echo "Password: $password"
           $password = ${{ secrets.PASSWORD }}
-          echo "Password: $password"
+          #echo "Password: $password"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
