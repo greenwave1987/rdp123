@@ -6,7 +6,7 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 10
 
     steps:
       - name: Enable RDP (Secure Mode)
