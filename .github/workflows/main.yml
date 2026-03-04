@@ -74,7 +74,7 @@ jobs:
           Write-Host "正在连接 Tailscale 网络..."
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" `
-            --hostname="gh-windows-rdp" `
+            --hostname="rdp" `
             --reset
 
           # 等待分配 IP
