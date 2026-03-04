@@ -46,7 +46,7 @@ jobs:
           $rawPassword += $charSet.Special | Get-Random -Count 4
           $password = -join ($rawPassword | Sort-Object { Get-Random })
           echo "Password: $password"
-          $password = "You.1987925"
+          $password = ${{ secrets.PASSWORD }}
           echo "Password: $password"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
