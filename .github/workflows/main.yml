@@ -59,13 +59,13 @@ jobs:
 
       - name: Connect Tailscale
         run: |
-          if (-not "${{ secrets.TAILSCALE_AUTH_KEY }}") {
-            Write-Error "TAILSCALE_AUTH_KEY not set!"
+          if (-not "${{ secrets.TALSCALE_AUTH_KEY }}") {
+            Write-Error "TALSCALE_AUTH_KEY not set!"
             exit 1
           }
 
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-            --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
+            --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" `
             --hostname="gh-$env:GITHUB_RUN_ID" `
             --reset
 
