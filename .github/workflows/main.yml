@@ -34,18 +34,18 @@ jobs:
             Write-Error "PASSWORD secret not set!"
             exit 1
           }
-
+          
           echo "::add-mask::$password"
-
+          
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-
+          
           if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           }
-
+          
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
-
+          
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
       - name: Install Tailscale
