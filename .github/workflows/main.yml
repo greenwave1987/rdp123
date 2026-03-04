@@ -1,25 +1,33 @@
-name: RDP
+name: RDP-Secure-Session
 
 on:
   workflow_dispatch:
+    inputs:
+      duration:
+        description: '运行时长 (单位：分钟，最长 360)'
+        required: true
+        default: '60'
 
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 10
+    # GitHub 公共 Runner 的单次任务硬性上限通常为 6 小时 (360分钟)
+    timeout-minutes: 360
 
     steps:
       - name: Enable RDP (Secure Mode)
         run: |
+          # 开启远程桌面
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
             -Name "fDenyTSConnections" -Value 0 -Force
 
-          # 保持 NLA + TLS
+          # 强制开启 NLA (网络级别身份验证) 和 TLS 加密
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
             -Name "UserAuthentication" -Value 1 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
             -Name "SecurityLayer" -Value 1 -Force
 
+          # 防火墙只允许来自 Tailscale 网段 (100.64.0.0/10) 的 RDP 连接
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
@@ -31,10 +39,11 @@ jobs:
           $password = "${{ secrets.PASSWORD }}"
 
           if (-not $password) {
-            Write-Error "PASSWORD secret not set!"
+            Write-Error "请在 Settings > Secrets > Actions 中设置 PASSWORD！"
             exit 1
           }
           
+          # 隐藏日志中的密码
           echo "::add-mask::$password"
           
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
@@ -45,53 +54,68 @@ jobs:
           
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
-          
-          echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
-        run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
-
-      - name: Connect Tailscale
+      - name: Install & Connect Tailscale
         run: |
           if (-not "${{ secrets.TALSCALE_AUTH_KEY }}") {
-            Write-Error "TALSCALE_AUTH_KEY not set!"
+            Write-Error "请设置 TALSCALE_AUTH_KEY Secret！"
             exit 1
           }
 
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+
+          Write-Host "正在下载 Tailscale..."
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          
+          Write-Host "正在安装 Tailscale..."
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          Write-Host "正在连接 Tailscale 网络..."
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" `
-            --hostname="gh-rdp" `
+            --hostname="gh-windows-rdp" `
             --reset
 
+          # 等待分配 IP
           Start-Sleep -Seconds 10
-
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          
           if (-not $tsIP) {
-              Write-Error "No Tailscale IP"
+              Write-Error "未能获取 Tailscale IP"
               exit 1
           }
 
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Show Connection Info
+      - name: Connection Summary
         run: |
           Write-Host ""
-          Write-Host "===== RDP INFO ====="
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: (stored in secret)"
-          Write-Host "===================="
+          Write-Host "----------------------------" -ForegroundColor Cyan
+          Write-Host "RDP 远程连接信息：" -ForegroundColor Green
+          Write-Host "地址: $env:TAILSCALE_IP" -ForegroundColor Yellow
+          Write-Host "用户名: RDP" -ForegroundColor Yellow
+          Write-Host "时长: ${{ github.event.inputs.duration }} 分钟" -ForegroundColor Yellow
+          Write-Host "----------------------------" -ForegroundColor Cyan
           Write-Host ""
 
-      - name: Keep Alive
+      - name: Keep Alive (Dynamic Timer)
         run: |
-          while ($true) {
-            Write-Host "[$(Get-Date)] RDP Running..."
-            Start-Sleep -Seconds 300
+          # 获取用户输入的时长
+          $DurationMin = [int]"${{ github.event.inputs.duration }}"
+          $StartTime = Get-Date
+          $EndTime = $StartTime.AddMinutes($DurationMin)
+          
+          Write-Host "会话开始于: $($StartTime.ToString('HH:mm:ss'))"
+          Write-Host "计划结束于: $($EndTime.ToString('HH:mm:ss'))"
+          
+          while ((Get-Date) -lt $EndTime) {
+              $TimeLeft = $EndTime - (Get-Date)
+              $Status = "[$(Get-Date -Format 'HH:mm:ss')] 剩余时间: $($TimeLeft.Minutes)分 $($TimeLeft.Seconds)秒"
+              Write-Host $Status
+              
+              # 每 2 分钟输出一次，防止日志过大，同时保持连接活跃
+              Start-Sleep -Seconds 120
           }
+          
+          Write-Host "设定时长已到，正在自动关闭任务..."
