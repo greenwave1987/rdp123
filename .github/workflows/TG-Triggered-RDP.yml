@@ -43,7 +43,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           
           # 使用 Secret 中的 Key 连接
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-rdp-win" --reset
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" --hostname="gh-rdp-win" --reset
           
           Start-Sleep -Seconds 10
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
