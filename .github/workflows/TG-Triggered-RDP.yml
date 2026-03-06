@@ -58,19 +58,18 @@ jobs:
           $IP = $env:TAILSCALE_IP
           $DURATION = "${{ github.event.client_payload.duration }}"
 
-          # 构造纯净的 JSON 负载
-          $BodyObj = @{
-              chat_id  = $CHAT_ID
-              status   = if ($IP) { "success" } else { "failed" }
-              ip       = if ($IP) { $IP } else { "none" }
-              duration = if ($DURATION) { $DURATION } else { "60" }
-          }
+          # 拼一个纯英文的简单字符串
+          $RawText = "IP:$IP|ID:$CHAT_ID|TIME:$DURATION"
           
-          $JsonBody = $BodyObj | ConvertTo-Json -Compress
-          
-          # 使用原生 PowerShell 方式发送，不带任何中文
-          Write-Host "Sending data to Worker: $JsonBody"
-          Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json" -Body $JsonBody
+          # 转换为 Base64 彻底消除乱码可能
+          $Bytes = [System.Text.Encoding]::UTF8.GetBytes($RawText)
+          $EncodedText = [Convert]::ToBase64String($Bytes)
+
+          $Body = @{
+              payload = $EncodedText
+          } | ConvertTo-Json
+
+          Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json" -Body $Body
           
       - name: Keep Alive
         run: |
