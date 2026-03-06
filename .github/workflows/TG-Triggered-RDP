@@ -1,0 +1,83 @@
+name: TG-Triggered-RDP
+
+on:
+  repository_dispatch:
+    # 这里的 type 对应你机器人发送请求中的 event_type
+    types: [open_rdp]
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Enable RDP (Secure Mode)
+        run: |
+          # 开启远程桌面及 NLA 安全认证
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
+
+          # 防火墙限制：仅允许 Tailscale 网段
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User
+        run: |
+          $password = "${{ secrets.PASSWORD }}"
+          Write-Host "::add-mask::$password"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          }
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+
+      - name: Connect Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          # 使用 Secret 中的 Key 连接
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-rdp-win" --reset
+          
+          Start-Sleep -Seconds 10
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Send IP back to Telegram
+        if: always()
+        shell: bash
+        run: |
+          CALLBACK="https://tg-github-bot.greenwave1987.workers.dev/callback"
+          CHAT_ID="${{ github.event.client_payload.chat_id }}"
+          IP="${{ env.TAILSCALE_IP }}"
+          
+          if [ -z "$IP" ]; then
+            TEXT="❌ RDP 启动失败：未能获取 Tailscale IP"
+          else
+            TEXT="✅ RDP 已就绪！%0A📍 地址: $IP%0A👤 用户: RDP%0A🔑 密码: 请查看 Github Secrets%0A⏰ 时长: ${{ github.event.client_payload.duration }} 分钟"
+          fi
+
+          curl -s -X POST "$CALLBACK" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\":\"$CHAT_ID\", \"text\":\"$TEXT\"}"
+
+      - name: Keep Alive
+        run: |
+          # 从机器人 payload 获取时长，如果没有则默认为 60
+          $inputDuration = "${{ github.event.client_payload.duration }}"
+          if ([string]::IsNullOrWhiteSpace($inputDuration)) { $DurationMin = 60 } else { $DurationMin = [int]$inputDuration }
+          
+          $EndTime = (Get-Date).AddMinutes($DurationMin)
+          Write-Host "会话保持中... 将在 $($EndTime.ToString('HH:mm:ss')) 结束"
+          
+          while ((Get-Date) -lt $EndTime) {
+              $Left = $EndTime - (Get-Date)
+              Write-Host "剩余时间: $($Left.Minutes)分 $($Left.Seconds)秒"
+              Start-Sleep -Seconds 120
+          }
