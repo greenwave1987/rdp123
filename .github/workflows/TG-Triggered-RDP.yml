@@ -51,21 +51,32 @@ jobs:
 
       - name: Send IP back to Telegram
         if: always()
-        shell: bash
+        shell: powershell
         run: |
-          CALLBACK="https://tg-github-bot.greenwave1987.workers.dev/callback"
-          CHAT_ID="${{ github.event.client_payload.chat_id }}"
-          IP="${{ env.TAILSCALE_IP }}"
-          
-          if [ -z "$IP" ]; then
-            TEXT="❌ RDP 启动失败：未能获取 Tailscale IP"
-          else
-            TEXT="✅ RDP 已就绪！%0A📍 地址: $IP%0A👤 用户: RDP%0A🔑 密码: 请查看 Github Secrets%0A⏰ 时长: ${{ github.event.client_payload.duration }} 分钟"
-          fi
+          $CALLBACK = "https://tg-github-bot.greenwave1987.workers.dev/callback"
+          $CHAT_ID = "${{ github.event.client_payload.chat_id }}"
+          $IP = $env:TAILSCALE_IP
+          $DURATION = "${{ github.event.client_payload.duration }}"
 
-          curl -s -X POST "$CALLBACK" \
-            -H "Content-Type: application/json" \
-            -d "{\"chat_id\":\"$CHAT_ID\", \"text\":\"$TEXT\"}"
+          if (-not $IP) {
+              $TEXT = "❌ RDP 启动失败：未能获取 Tailscale IP"
+          } else {
+              $TEXT = @"
+          ✅ RDP 已就绪！
+          📍 地址: $IP
+          👤 用户: RDP
+          🔑 密码: 请查看 Github Secrets
+          ⏰ 时长: $DURATION 分钟
+          "@
+                }
+      
+                $Body = @{
+                    chat_id = $CHAT_ID
+                    text    = $TEXT
+                } | ConvertTo-Json
+      
+                # 明确指定使用 UTF8 编码发送请求
+                Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($Body))
 
       - name: Keep Alive
         run: |
