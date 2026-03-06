@@ -53,35 +53,22 @@ jobs:
         if: always()
         shell: powershell
         run: |
-          # 设置输出编码为 UTF8
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          
           $CALLBACK = "https://tg-github-bot.greenwave1987.workers.dev/callback"
           $CHAT_ID = "${{ github.event.client_payload.chat_id }}"
           $IP = $env:TAILSCALE_IP
           $DURATION = "${{ github.event.client_payload.duration }}"
 
-          # 使用 Unicode 编码定义中文，避免脚本解析错误
-          # \u2705 = ✅, \uD83D\uDCCD = 📍, \uD83D\uDC64 = 👤, \uD83D\uDD11 = 🔑, \u23F0 = ⏰
-          if (-not $IP) {
-              $MSG = "RDP Start Failed: No IP found"
-          } else {
-              $MSG = "[SUCCESS] RDP Ready!`nAddr: $IP`nUser: RDP`nPass: Check Github Secrets`nTime: $DURATION Min"
-              
-              # 如果你一定要中文，用下面这段安全的 Unicode 拼接
-              $MSG = "$([char]0x2705) RDP 已就绪！`n$([char]0xD83D)$([char]0xDCCD) 地址: $IP`n$([char]0xD83D)$([char]0DC64) 用户: RDP`n$([char]0xD83D)$([char]0DD11) 密码: 请查看 Github Secrets`n$([char]0x23F0) 时长: $DURATION 分钟"
-          }
-
+          # 只发送最基础的数据，不带任何可能导致乱码的中文
           $BodyObj = @{
               chat_id = $CHAT_ID
-              text    = $MSG
+              status  = if ($IP) { "success" } else { "failed" }
+              ip      = if ($IP) { $IP } else { "none" }
+              duration = $DURATION
           }
           
           $JsonBody = $BodyObj | ConvertTo-Json -Compress
-          $Utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($JsonBody)
-
-          # 发送请求
-          Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json; charset=utf-8" -Body $Utf8Bytes
+          Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json" -Body $JsonBody
+          
       - name: Keep Alive
         run: |
           # 从机器人 payload 获取时长，如果没有则默认为 60
