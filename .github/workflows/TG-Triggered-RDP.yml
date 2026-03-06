@@ -2,7 +2,6 @@ name: TG-Triggered-RDP
 
 on:
   repository_dispatch:
-    # 这里的 type 对应你机器人发送请求中的 event_type
     types: [open_rdp]
 
 jobs:
@@ -13,12 +12,10 @@ jobs:
     steps:
       - name: Enable RDP (Secure Mode)
         run: |
-          # 开启远程桌面及 NLA 安全认证
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
 
-          # 防火墙限制：仅允许 Tailscale 网段
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
           Restart-Service -Name TermService -Force
@@ -35,15 +32,20 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-      - name: Connect Tailscale
+      - name: Connect Tailscale (Ephemeral Mode)
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           
-          # 使用 Secret 中的 Key 连接
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" --hostname="rdp" --reset
+          # 关键修改：增加 --ephemeral 标志，任务结束节点自动消失
+          # 同时 hostname 使用固定名称，因为是临时节点，不会再产生冲突编号
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" `
+            --hostname="github-rdp" `
+            --reset `
+            --ephemeral
           
           Start-Sleep -Seconds 10
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
@@ -58,24 +60,18 @@ jobs:
           $IP = $env:TAILSCALE_IP
           $DURATION = "${{ github.event.client_payload.duration }}"
 
-          # 拼一个纯英文的简单字符串
+          # Base64 方案：确保 Worker 侧能收到完整数据
           $RawText = "IP:$IP|ID:$CHAT_ID|TIME:$DURATION"
-          
-          # 转换为 Base64 彻底消除乱码可能
           $Bytes = [System.Text.Encoding]::UTF8.GetBytes($RawText)
           $EncodedText = [Convert]::ToBase64String($Bytes)
-
-          $Body = @{
-              payload = $EncodedText
-          } | ConvertTo-Json
+          $Body = @{ payload = $EncodedText } | ConvertTo-Json
 
           Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json" -Body $Body
-          
+
       - name: Keep Alive
         run: |
-          # 从机器人 payload 获取时长，如果没有则默认为 60
           $inputDuration = "${{ github.event.client_payload.duration }}"
-          if ([string]::IsNullOrWhiteSpace($inputDuration)) { $DurationMin = 60 } else { $DurationMin = [int]$inputDuration }
+          $DurationMin = if ([string]::IsNullOrWhiteSpace($inputDuration)) { 60 } else { [int]$inputDuration }
           
           $EndTime = (Get-Date).AddMinutes($DurationMin)
           Write-Host "会话保持中... 将在 $($EndTime.ToString('HH:mm:ss')) 结束"
@@ -85,3 +81,9 @@ jobs:
               Write-Host "剩余时间: $($Left.Minutes)分 $($Left.Seconds)秒"
               Start-Sleep -Seconds 120
           }
+
+      - name: Cleanup Tailscale
+        if: always()
+        run: |
+          # 任务结束主动登出，双重保险清理列表
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" logout
