@@ -53,7 +53,7 @@ jobs:
         if: always()
         shell: powershell
         run: |
-          # 1. 强制当前会话输出编码为 UTF8
+          # 设置输出编码为 UTF8
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           
           $CALLBACK = "https://tg-github-bot.greenwave1987.workers.dev/callback"
@@ -61,24 +61,27 @@ jobs:
           $IP = $env:TAILSCALE_IP
           $DURATION = "${{ github.event.client_payload.duration }}"
 
+          # 使用 Unicode 编码定义中文，避免脚本解析错误
+          # \u2705 = ✅, \uD83D\uDCCD = 📍, \uD83D\uDC64 = 👤, \uD83D\uDD11 = 🔑, \u23F0 = ⏰
           if (-not $IP) {
-              $TEXT = "❌ RDP 启动失败：未能获取 Tailscale IP"
+              $MSG = "RDP Start Failed: No IP found"
           } else {
-              $TEXT = "✅ RDP 已就绪！`n📍 地址: $IP`n👤 用户: RDP`n🔑 密码: 请查看 Github Secrets`n⏰ 时长: $DURATION 分钟"
+              $MSG = "[SUCCESS] RDP Ready!`nAddr: $IP`nUser: RDP`nPass: Check Github Secrets`nTime: $DURATION Min"
+              
+              # 如果你一定要中文，用下面这段安全的 Unicode 拼接
+              $MSG = "$([char]0x2705) RDP 已就绪！`n$([char]0xD83D)$([char]0xDCCD) 地址: $IP`n$([char]0xD83D)$([char]0DC64) 用户: RDP`n$([char]0xD83D)$([char]0DD11) 密码: 请查看 Github Secrets`n$([char]0x23F0) 时长: $DURATION 分钟"
           }
 
-          # 2. 构建 JSON 对象
           $BodyObj = @{
               chat_id = $CHAT_ID
-              text    = $TEXT
+              text    = $MSG
           }
+          
           $JsonBody = $BodyObj | ConvertTo-Json -Compress
-
-          # 3. 关键：将字符串强制转为 UTF-8 字节数组发送，防止 Windows 默认编码干扰
           $Utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($JsonBody)
 
+          # 发送请求
           Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json; charset=utf-8" -Body $Utf8Bytes
-      
       - name: Keep Alive
         run: |
           # 从机器人 payload 获取时长，如果没有则默认为 60
