@@ -11,6 +11,7 @@ jobs:
 
     steps:
       - name: Enable RDP (Secure Mode)
+        shell: powershell
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
@@ -18,36 +19,37 @@ jobs:
 
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
-          Restart-Service -Name TermService -Force
+
+          Restart-Service TermService -Force
 
       - name: Create RDP User
+        shell: powershell
         run: |
           $password = "${{ secrets.PASSWORD }}"
           Write-Host "::add-mask::$password"
+
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          
+
           if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           }
+
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-      - name: Connect Tailscale (Ephemeral Mode)
+      - name: Install and Connect Tailscale
+        shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
+
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          
-          # 关键修改：增加 --ephemeral 标志，任务结束节点自动消失
-          # 同时 hostname 使用固定名称，因为是临时节点，不会再产生冲突编号
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-            --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" `
-            --hostname="github-rdp" `
-            --reset `
-            --ephemeral
-          
-          Start-Sleep -Seconds 10
+          Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
+
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" --hostname="rdp" --reset
+
+          Start-Sleep 10
+
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
@@ -60,30 +62,34 @@ jobs:
           $IP = $env:TAILSCALE_IP
           $DURATION = "${{ github.event.client_payload.duration }}"
 
-          # Base64 方案：确保 Worker 侧能收到完整数据
           $RawText = "IP:$IP|ID:$CHAT_ID|TIME:$DURATION"
           $Bytes = [System.Text.Encoding]::UTF8.GetBytes($RawText)
           $EncodedText = [Convert]::ToBase64String($Bytes)
+
           $Body = @{ payload = $EncodedText } | ConvertTo-Json
 
           Invoke-RestMethod -Uri $CALLBACK -Method Post -ContentType "application/json" -Body $Body
 
       - name: Keep Alive
+        shell: powershell
         run: |
           $inputDuration = "${{ github.event.client_payload.duration }}"
-          $DurationMin = if ([string]::IsNullOrWhiteSpace($inputDuration)) { 60 } else { [int]$inputDuration }
-          
+
+          if ([string]::IsNullOrWhiteSpace($inputDuration)) {
+              $DurationMin = 60
+          } else {
+              $DurationMin = [int]$inputDuration
+          }
+
           $EndTime = (Get-Date).AddMinutes($DurationMin)
-          Write-Host "会话保持中... 将在 $($EndTime.ToString('HH:mm:ss')) 结束"
-          
+          Write-Host "Session running until $EndTime"
+
           while ((Get-Date) -lt $EndTime) {
-              $Left = $EndTime - (Get-Date)
-              Write-Host "剩余时间: $($Left.Minutes)分 $($Left.Seconds)秒"
-              Start-Sleep -Seconds 120
+              Start-Sleep 120
           }
 
       - name: Cleanup Tailscale
         if: always()
+        shell: powershell
         run: |
-          # 任务结束主动登出，双重保险清理列表
           & "$env:ProgramFiles\Tailscale\tailscale.exe" logout
