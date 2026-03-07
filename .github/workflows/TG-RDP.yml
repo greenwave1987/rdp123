@@ -96,13 +96,13 @@ jobs:
         if([string]::IsNullOrWhiteSpace($TIME)){ $TIME=60 }
 
         $msg=@"
-RDP READY
-
-IP: $IP
-USER: RDP
-PASS: $PASS
-TIME: $TIME min
-"@
+        RDP READY
+        
+        IP: $IP
+        USER: RDP
+        PASS: $PASS
+        TIME: $TIME min
+        "@
 
         $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
 
