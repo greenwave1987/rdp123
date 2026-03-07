@@ -38,35 +38,46 @@ jobs:
     - name: Install Tailscale & Connect
       shell: powershell
       run: |
+        # 永远不 exit
         $ErrorActionPreference="Continue"
-
+        
         function SendTG($msg){
           try{
             $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
             $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
             Invoke-RestMethod -Uri $url -Method Post -TimeoutSec 15 -ContentType "application/json" -Body (@{payload=$enc}|ConvertTo-Json)
-          }catch{ Write-Host "TG push failed" }
+          }catch{
+            Write-Host "TG push failed"
+          }
         }
-
-        # 安装 tailscale
-        $pkg="$env:TEMP\tailscale.msi"
-        Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile $pkg
-        Start-Process msiexec.exe -ArgumentList "/i `"$pkg`" /quiet /norestart" -Wait
-
-        # 启动 tailscale
-        $output = cmd /c "`"$env:ProgramFiles\Tailscale\tailscale.exe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
+        
+        # 启动 Tailscale（允许失败）
+        try{
+          $output = cmd /c "`"$env:ProgramFiles\Tailscale\tailscale.exe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
+        }catch{
+          Write-Host "tailscale up failed but continuing"
+        }
+        
         $text = $output | Out-String
         Write-Host $text
-
-        # AUTH_KEY 失效
-        $login=($text | Select-String "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})[0]
-        if($login){ SendTG ("TAILSCALE LOGIN`n"+$login) }
-
-        Start-Sleep 8
-
-        # 获取 IP
+        
+        # 如果需要登录，提取链接
+        $login=($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})[0]
+        
+        if($login){
+          Write-Host "TAILSCALE NEEDS LOGIN: $login"
+          SendTG ("TAILSCALE LOGIN`n"+$login)
+        }
+        
+        # 尝试获取 IP
         $ipList = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null
-        if(!$ipList){ SendTG "TAILSCALE CONNECT FAILED" }else{ $ip=$ipList[0]; echo "TSIP=$ip" >> $env:GITHUB_ENV }
+        
+        if(!$ipList){
+          Write-Host "No Tailscale IP"
+        }else{
+          $ip=$ipList[0]
+          echo "TSIP=$ip" >> $env:GITHUB_ENV
+        }
 
     # -----------------------------
     - name: Install Common Tools
