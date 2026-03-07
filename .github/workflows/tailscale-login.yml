@@ -1,0 +1,27 @@
+name: tailscale-login
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: install deps
+        run: |
+          pip install playwright pyotp
+          playwright install chromium
+
+      - name: run login
+        env:
+          GH_USER: ${{ secrets.GH_USER }}
+          GH_PASS: ${{ secrets.GH_PASS }}
+          GH_TOTP: ${{ secrets.GH_TOTP }}
+        run: python login.py
