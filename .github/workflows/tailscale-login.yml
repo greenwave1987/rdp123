@@ -1,29 +1,38 @@
-name: tailscale-login
+name: Auto Rotate Tailscale AuthKey
 
 on:
+  schedule:
+    # 每天凌晨 3 点自动执行
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
-  login:
-
+  rotate_authkey:
     runs-on: ubuntu-latest
 
+    env:
+      GH_USER: ${{ secrets.GH_USER }}
+      GH_PASS: ${{ secrets.GH_PASS }}
+      GH_TOTP: ${{ secrets.GH_TOTP }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      SECRET_NAME: "TAILSCALE_AUTH_KEY"
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: |
-          pip install playwright pyotp
+          python -m pip install --upgrade pip
+          pip install playwright pyotp requests pynacl
           playwright install chromium
 
-      - name: 运行脚本
-        env:
-          GH_USER: ${{ secrets.GH_USER }}
-          GH_PASS: ${{ secrets.GH_PASS }}
-          GH_TOTP: ${{ secrets.GH_TOTP }}
-        run: python login.py
+      - name: Run Tailscale AuthKey rotation
+        run: |
+          python login.py
