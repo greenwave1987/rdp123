@@ -1,4 +1,4 @@
-name: TG-RDP-v3.1
+name: TG-RDP-v4
 
 on:
   repository_dispatch:
@@ -8,194 +8,108 @@ jobs:
 
   rdp:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 480
 
     steps:
 
+    # -----------------------------
     - name: Enable RDP
       shell: powershell
       run: |
-
-        Set-ItemProperty `
-        -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-        -Name "fDenyTSConnections" -Value 0 -Force
-
-        Set-ItemProperty `
-        -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-        -Name "UserAuthentication" -Value 1 -Force
-
-        netsh advfirewall firewall add rule name="RDP-Tailscale" `
-        dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
-
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+        netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
         Restart-Service TermService -Force
 
-
+    # -----------------------------
     - name: Create RDP User
       shell: powershell
       run: |
-
         $pass="${{ secrets.PASSWORD }}"
         Write-Host "::add-mask::$pass"
-
         $secure=ConvertTo-SecureString $pass -AsPlainText -Force
-
         if(-not(Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)){
-            New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires
+          New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires
         }
-
         Add-LocalGroupMember Administrators RDP -ErrorAction SilentlyContinue
         Add-LocalGroupMember "Remote Desktop Users" RDP -ErrorAction SilentlyContinue
 
-
-    - name: Install Tailscale
+    # -----------------------------
+    - name: Install Tailscale & Connect
       shell: powershell
       run: |
-
         $ErrorActionPreference="Continue"
 
         function SendTG($msg){
-
           try{
-
             $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
-
-            $enc=[Convert]::ToBase64String(
-            [Text.Encoding]::UTF8.GetBytes($msg))
-
-            Invoke-RestMethod `
-            -Uri $url `
-            -Method Post `
-            -TimeoutSec 15 `
-            -ContentType "application/json" `
-            -Body (@{payload=$enc}|ConvertTo-Json)
-
-          }catch{
-
-            Write-Host "TG push failed"
-
-          }
-
+            $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
+            Invoke-RestMethod -Uri $url -Method Post -TimeoutSec 15 -ContentType "application/json" -Body (@{payload=$enc}|ConvertTo-Json)
+          }catch{ Write-Host "TG push failed" }
         }
 
-        # install tailscale
-
+        # 安装 tailscale
         $pkg="$env:TEMP\tailscale.msi"
+        Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile $pkg
+        Start-Process msiexec.exe -ArgumentList "/i `"$pkg`" /quiet /norestart" -Wait
 
-        Invoke-WebRequest `
-        https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi `
-        -OutFile $pkg
-
-        Start-Process msiexec.exe `
-        -ArgumentList "/i `"$pkg`" /quiet /norestart" `
-        -Wait
-
-
-        # start tailscale
-
-        $output=& "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-        --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
-        --hostname="gh-rdp" `
-        --reset `
-        --timeout=15s 2>&1
-
-        $text=$output|Out-String
+        # 启动 tailscale
+        $output = cmd /c "`"$env:ProgramFiles\Tailscale\tailscale.exe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
+        $text = $output | Out-String
         Write-Host $text
 
-
-        # detect login link
-
-        $login=($text|Select-String "https://login.tailscale.com/\S+"|
-        ForEach-Object{$_.Matches.Value})[0]
-
-        if($login){
-
-          SendTG ("TAILSCALE LOGIN`n"+$login)
-
-        }
+        # AUTH_KEY 失效
+        $login=($text | Select-String "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})[0]
+        if($login){ SendTG ("TAILSCALE LOGIN`n"+$login) }
 
         Start-Sleep 8
 
+        # 获取 IP
+        $ipList = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null
+        if(!$ipList){ SendTG "TAILSCALE CONNECT FAILED" }else{ $ip=$ipList[0]; echo "TSIP=$ip" >> $env:GITHUB_ENV }
 
-        # get tailscale ip
+    # -----------------------------
+    - name: Install Common Tools
+      shell: powershell
+      run: |
+        choco install googlechrome -y
+        choco install vscode -y
 
-        $ip=(& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4)[0]
-
-        if(!$ip){
-
-          SendTG "TAILSCALE CONNECT FAILED"
-
-        }else{
-
-          echo "TSIP=$ip" >> $env:GITHUB_ENV
-
-        }
-
-
+    # -----------------------------
     - name: Send RDP Info
       shell: powershell
       run: |
-
         function SendTG($msg){
-
           try{
-
             $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
-
-            $enc=[Convert]::ToBase64String(
-            [Text.Encoding]::UTF8.GetBytes($msg))
-
-            Invoke-RestMethod `
-            -Uri $url `
-            -Method Post `
-            -TimeoutSec 15 `
-            -ContentType "application/json" `
-            -Body (@{payload=$enc}|ConvertTo-Json)
-
+            $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
+            Invoke-RestMethod -Uri $url -Method Post -TimeoutSec 15 -ContentType "application/json" -Body (@{payload=$enc}|ConvertTo-Json)
           }catch{}
-
         }
 
         $ip=$env:TSIP
         $pass="${{ secrets.PASSWORD }}"
         $time="${{ github.event.client_payload.duration }}"
-
         if([string]::IsNullOrWhiteSpace($time)){ $time=60 }
 
-        $msg="🖥 RDP READY`n`n" +
-             "IP: $ip`n" +
-             "USER: RDP`n" +
-             "PASS: $pass`n" +
-             "TIME: $time MIN"
-
+        $msg="🖥 RDP READY`n`nIP: $ip`nUSER: RDP`nPASS: $pass`nTIME: $time MIN"
         SendTG $msg
 
-
+    # -----------------------------
     - name: Keep Alive
       shell: powershell
       run: |
-
         $input="${{ github.event.client_payload.duration }}"
-
-        if([string]::IsNullOrWhiteSpace($input)){
-          $duration=60
-        }else{
-          $duration=[int]$input
-        }
-
+        if([string]::IsNullOrWhiteSpace($input)){ $duration=60 }else{ $duration=[int]$input }
         $end=(Get-Date).AddMinutes($duration)
-
         while((Get-Date)-lt $end){
-
           Write-Host "Alive $(Get-Date)"
-
           Start-Sleep 60
-
         }
 
-
+    # -----------------------------
     - name: Cleanup
       if: always()
       shell: powershell
       run: |
-
         & "$env:ProgramFiles\Tailscale\tailscale.exe" logout
