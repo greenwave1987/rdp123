@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run:
+  login:
     runs-on: ubuntu-latest
 
     steps:
@@ -14,14 +14,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: install deps
+      - name: 安装依赖
         run: |
           pip install playwright pyotp
           playwright install chromium
 
-      - name: run login
+      - name: 运行脚本
         env:
           GH_USER: ${{ secrets.GH_USER }}
           GH_PASS: ${{ secrets.GH_PASS }}
           GH_TOTP: ${{ secrets.GH_TOTP }}
-        run: python get_keys.py
+        run: python login.py
