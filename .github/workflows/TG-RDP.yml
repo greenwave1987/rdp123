@@ -1,4 +1,4 @@
-name: TG-RDP-v4
+name: TG-RDP-v4.1
 
 on:
   repository_dispatch:
@@ -37,7 +37,7 @@ jobs:
     - name: Install Tailscale & Connect
       shell: powershell
       run: |
-        $ErrorActionPreference="Continue"
+        $global:ErrorActionPreference = "Continue"
 
         function SendTG($msg){
           try{
@@ -60,27 +60,27 @@ jobs:
         if(-not(Test-Path $tsExe)){ SendTG "❌ Tailscale exe not found after install"; return }
 
         # -----------------------------
-        # 启动 Tailscale，捕获错误
+        # 启动 Tailscale，捕获所有错误
         try{
-          $output = cmd /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
+          $output = cmd /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=30s 2>&1"
         }catch{
-          Write-Host "tailscale up failed, continuing"
+          $output = $_.Exception.Message
         }
 
-        $text = $output | Out-String
+        $text = @($output | Out-String)
         Write-Host $text
 
         # -----------------------------
-        # NeedsLogin 自动处理
-        $login=($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})
-        if($login -and $login.Count -gt 0){
+        # NeedsLogin 自动推送 TG
+        $login = @($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})
+        if($login.Count -gt 0){
           SendTG "⚠️ TAILSCALE LOGIN REQUIRED`n$($login[0])"
         }
 
         # -----------------------------
-        # 获取 Tailscale IP
-        $ipList = & "$tsExe" ip -4 2>$null
-        if($ipList -and $ipList.Count -gt 0){
+        # 安全获取 Tailscale IP
+        $ipList = @(& "$tsExe" ip -4 2>$null)
+        if($ipList.Count -gt 0){
           $ip=$ipList[0]
           echo "TSIP=$ip" >> $env:GITHUB_ENV
           SendTG "✅ Tailscale connected`nIP: $ip"
