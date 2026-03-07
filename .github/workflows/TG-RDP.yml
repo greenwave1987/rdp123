@@ -1,4 +1,4 @@
-name: TG-RDP-Ultimate
+name: TG-RDP-v3.1
 
 on:
   repository_dispatch:
@@ -16,13 +16,13 @@ jobs:
       shell: powershell
       run: |
 
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        Set-ItemProperty `
+        -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+        -Name "fDenyTSConnections" -Value 0 -Force
 
         Set-ItemProperty `
         -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
         -Name "UserAuthentication" -Value 1 -Force
-
-        netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
 
         netsh advfirewall firewall add rule name="RDP-Tailscale" `
         dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
@@ -34,19 +34,13 @@ jobs:
       shell: powershell
       run: |
 
-        $password="${{ secrets.PASSWORD }}"
+        $pass="${{ secrets.PASSWORD }}"
+        Write-Host "::add-mask::$pass"
 
-        Write-Host "::add-mask::$password"
-
-        $secure=ConvertTo-SecureString $password -AsPlainText -Force
+        $secure=ConvertTo-SecureString $pass -AsPlainText -Force
 
         if(-not(Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)){
-
-          New-LocalUser `
-          -Name "RDP" `
-          -Password $secure `
-          -AccountNeverExpires
-
+            New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires
         }
 
         Add-LocalGroupMember Administrators RDP -ErrorAction SilentlyContinue
@@ -57,87 +51,123 @@ jobs:
       shell: powershell
       run: |
 
-        $CALLBACK="https://tg-github-bot.greenwave1987.workers.dev/callback"
-
-        $url="https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
-        $file="$env:TEMP\tailscale.msi"
-
-        Invoke-WebRequest $url -OutFile $file
-
-        Start-Process msiexec.exe -ArgumentList "/i `"$file`" /quiet /norestart" -Wait
-
         $ErrorActionPreference="Continue"
+
+        function SendTG($msg){
+
+          try{
+
+            $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
+
+            $enc=[Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($msg))
+
+            Invoke-RestMethod `
+            -Uri $url `
+            -Method Post `
+            -TimeoutSec 15 `
+            -ContentType "application/json" `
+            -Body (@{payload=$enc}|ConvertTo-Json)
+
+          }catch{
+
+            Write-Host "TG push failed"
+
+          }
+
+        }
+
+        # install tailscale
+
+        $pkg="$env:TEMP\tailscale.msi"
+
+        Invoke-WebRequest `
+        https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi `
+        -OutFile $pkg
+
+        Start-Process msiexec.exe `
+        -ArgumentList "/i `"$pkg`" /quiet /norestart" `
+        -Wait
+
+
+        # start tailscale
 
         $output=& "$env:ProgramFiles\Tailscale\tailscale.exe" up `
         --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
         --hostname="gh-rdp" `
-        --reset 2>&1
+        --reset `
+        --timeout=15s 2>&1
 
         $text=$output|Out-String
-
         Write-Host $text
 
-        $login=($text|Select-String "https://login.tailscale.com/\S+"|ForEach-Object{$_.Matches.Value})[0]
+
+        # detect login link
+
+        $login=($text|Select-String "https://login.tailscale.com/\S+"|
+        ForEach-Object{$_.Matches.Value})[0]
 
         if($login){
 
-            $msg="TAILSCALE LOGIN:`n$login"
-
-            $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
-
-            Invoke-RestMethod `
-            -Uri $CALLBACK `
-            -Method Post `
-            -ContentType "application/json" `
-            -Body (@{payload=$enc}|ConvertTo-Json)
+          SendTG ("TAILSCALE LOGIN`n"+$login)
 
         }
 
-        Start-Sleep 10
+        Start-Sleep 8
+
+
+        # get tailscale ip
 
         $ip=(& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4)[0]
 
-        echo "TSIP=$ip" >> $env:GITHUB_ENV
+        if(!$ip){
 
+          SendTG "TAILSCALE CONNECT FAILED"
 
-    - name: Install Tools
-      shell: powershell
-      run: |
+        }else{
 
-        choco install googlechrome -y
-        choco install vscode -y
+          echo "TSIP=$ip" >> $env:GITHUB_ENV
+
+        }
 
 
     - name: Send RDP Info
       shell: powershell
       run: |
 
-        $CALLBACK="https://tg-github-bot.greenwave1987.workers.dev/callback"
+        function SendTG($msg){
 
-        $IP=$env:TSIP
-        $PASS="${{ secrets.PASSWORD }}"
-        $TIME="${{ github.event.client_payload.duration }}"
+          try{
 
-        if([string]::IsNullOrWhiteSpace($TIME)){
-          $TIME=60
+            $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
+
+            $enc=[Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($msg))
+
+            Invoke-RestMethod `
+            -Uri $url `
+            -Method Post `
+            -TimeoutSec 15 `
+            -ContentType "application/json" `
+            -Body (@{payload=$enc}|ConvertTo-Json)
+
+          }catch{}
+
         }
 
-        $msg=@"
-        RDP READY
-        
-        IP: $IP
-        USER: RDP
-        PASS: $PASS
-        TIME: $TIME MIN
-        "@
+        $ip=$env:TSIP
+        $pass="${{ secrets.PASSWORD }}"
+        $time="${{ github.event.client_payload.duration }}"
 
-        $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
+        if([string]::IsNullOrWhiteSpace($time)){ $time=60 }
 
-        Invoke-RestMethod `
-        -Uri $CALLBACK `
-        -Method Post `
-        -ContentType "application/json" `
-        -Body (@{payload=$enc}|ConvertTo-Json)
+        $msg="🖥 RDP READY`n`n" +
+             "IP: $ip`n" +
+             "USER: RDP`n" +
+             "PASS: $pass`n" +
+             "TIME: $time MIN"
+
+        SendTG $msg
 
 
     - name: Keep Alive
@@ -154,13 +184,11 @@ jobs:
 
         $end=(Get-Date).AddMinutes($duration)
 
-        Write-Host "Running until $end"
+        while((Get-Date)-lt $end){
 
-        while((Get-Date) -lt $end){
+          Write-Host "Alive $(Get-Date)"
 
-            Write-Host "Alive $(Get-Date)"
-
-            Start-Sleep 60
+          Start-Sleep 60
 
         }
 
