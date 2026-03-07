@@ -200,7 +200,7 @@ def create_authkey(page):
     """)
     log(result)
 
-    key = result.get("key")
+    key = result["data"]["fullKey"]
 
     log(f"新 AuthKey: {key}")
 
