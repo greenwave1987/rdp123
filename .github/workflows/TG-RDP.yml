@@ -1,10 +1,11 @@
-name: TG-RDP
+name: TG-RDP-Ultimate
 
 on:
   repository_dispatch:
     types: [open_rdp]
 
 jobs:
+
   rdp:
     runs-on: windows-latest
     timeout-minutes: 360
@@ -14,12 +15,17 @@ jobs:
     - name: Enable RDP
       shell: powershell
       run: |
+
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
+
+        Set-ItemProperty `
+        -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+        -Name "UserAuthentication" -Value 1 -Force
 
         netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
-        netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
+
+        netsh advfirewall firewall add rule name="RDP-Tailscale" `
+        dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
 
         Restart-Service TermService -Force
 
@@ -27,17 +33,24 @@ jobs:
     - name: Create RDP User
       shell: powershell
       run: |
+
         $password="${{ secrets.PASSWORD }}"
+
         Write-Host "::add-mask::$password"
 
         $secure=ConvertTo-SecureString $password -AsPlainText -Force
 
         if(-not(Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)){
-          New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires
+
+          New-LocalUser `
+          -Name "RDP" `
+          -Password $secure `
+          -AccountNeverExpires
+
         }
 
-        Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+        Add-LocalGroupMember Administrators RDP -ErrorAction SilentlyContinue
+        Add-LocalGroupMember "Remote Desktop Users" RDP -ErrorAction SilentlyContinue
 
 
     - name: Install Tailscale
@@ -45,35 +58,39 @@ jobs:
       run: |
 
         $CALLBACK="https://tg-github-bot.greenwave1987.workers.dev/callback"
-        $CHAT_ID="${{ github.event.client_payload.chat_id }}"
 
         $url="https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
         $file="$env:TEMP\tailscale.msi"
 
         Invoke-WebRequest $url -OutFile $file
+
         Start-Process msiexec.exe -ArgumentList "/i `"$file`" /quiet /norestart" -Wait
 
+        $ErrorActionPreference="Continue"
+
         $output=& "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-          --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
-          --hostname="gh-rdp" `
-          --reset 2>&1
+        --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
+        --hostname="gh-rdp" `
+        --reset 2>&1
 
         $text=$output|Out-String
 
         Write-Host $text
 
-        $loginUrl=($text|Select-String -Pattern "https://login.tailscale.com/\S+"|ForEach-Object{$_.Matches.Value})[0]
+        $login=($text|Select-String "https://login.tailscale.com/\S+"|ForEach-Object{$_.Matches.Value})[0]
 
-        if($loginUrl){
+        if($login){
 
-          Write-Host "AUTH KEY INVALID"
+            $msg="TAILSCALE LOGIN:`n$login"
 
-          $raw="TAILSCALE LOGIN: $loginUrl"
-          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($raw))
+            $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
 
-          $body=@{payload=$encoded}|ConvertTo-Json
+            Invoke-RestMethod `
+            -Uri $CALLBACK `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body (@{payload=$enc}|ConvertTo-Json)
 
-          Invoke-RestMethod $CALLBACK -Method Post -ContentType "application/json" -Body $body
         }
 
         Start-Sleep 10
@@ -83,17 +100,27 @@ jobs:
         echo "TSIP=$ip" >> $env:GITHUB_ENV
 
 
+    - name: Install Tools
+      shell: powershell
+      run: |
+
+        choco install googlechrome -y
+        choco install vscode -y
+
+
     - name: Send RDP Info
       shell: powershell
       run: |
 
         $CALLBACK="https://tg-github-bot.greenwave1987.workers.dev/callback"
-        $CHAT_ID="${{ github.event.client_payload.chat_id }}"
-        $IP=$env:TSIP
-        $TIME="${{ github.event.client_payload.duration }}"
-        $PASS="${{ secrets.PASSWORD }}"
 
-        if([string]::IsNullOrWhiteSpace($TIME)){ $TIME=60 }
+        $IP=$env:TSIP
+        $PASS="${{ secrets.PASSWORD }}"
+        $TIME="${{ github.event.client_payload.duration }}"
+
+        if([string]::IsNullOrWhiteSpace($TIME)){
+          $TIME=60
+        }
 
         $msg=@"
         RDP READY
@@ -101,14 +128,16 @@ jobs:
         IP: $IP
         USER: RDP
         PASS: $PASS
-        TIME: $TIME min
+        TIME: $TIME MIN
         "@
 
-        $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
+        $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
 
-        $body=@{payload=$encoded}|ConvertTo-Json
-
-        Invoke-RestMethod $CALLBACK -Method Post -ContentType "application/json" -Body $body
+        Invoke-RestMethod `
+        -Uri $CALLBACK `
+        -Method Post `
+        -ContentType "application/json" `
+        -Body (@{payload=$enc}|ConvertTo-Json)
 
 
     - name: Keep Alive
@@ -125,13 +154,14 @@ jobs:
 
         $end=(Get-Date).AddMinutes($duration)
 
-        Write-Host "Session until $end"
+        Write-Host "Running until $end"
 
-        while((Get-Date)-lt $end){
+        while((Get-Date) -lt $end){
 
-          Write-Host "Alive: $(Get-Date)"
+            Write-Host "Alive $(Get-Date)"
 
-          Start-Sleep 60
+            Start-Sleep 60
+
         }
 
 
@@ -139,7 +169,5 @@ jobs:
       if: always()
       shell: powershell
       run: |
-
-        Write-Host "Cleaning tailscale"
 
         & "$env:ProgramFiles\Tailscale\tailscale.exe" logout
