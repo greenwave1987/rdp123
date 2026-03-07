@@ -46,7 +46,7 @@ jobs:
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
 
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TALSCALE_AUTH_KEY }}" --hostname="rdp" --reset
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="rdp" --reset
 
           Start-Sleep 10
 
