@@ -156,7 +156,7 @@ def delete_old_keys(page):
 
         page.evaluate(f"""
         async () => {{
-            await fetch("https://login.tailscale.com/admin/api/keys/{key_id}", {{
+            await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys/{key_id}", {{
                 method:"DELETE"
             }});
         }}
