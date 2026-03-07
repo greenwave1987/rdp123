@@ -21,7 +21,11 @@ GH_TOKEN = os.getenv("GH_TOKEN")
 GH_REPO = os.getenv("GH_REPO")
 SECRET_NAME = os.getenv("SECRET_NAME")
 
-
+def mask_key(key: str):
+    if not key or len(key) < 10:
+        return "***"
+    return f"{key[:6]}***{key[-4:]}"
+    
 def log(msg):
     now = datetime.now().strftime("%H:%M:%S")
     print(f"[{now}] {msg}")
@@ -201,7 +205,7 @@ def create_authkey(page):
 
     key = result["data"]["fullKey"]
 
-    log(f"新 AuthKey: {key}")
+    log(f"新 AuthKey: {mask_key(new_key_value)}")
 
     return key
 
