@@ -59,7 +59,8 @@ jobs:
         $tsExe="$env:ProgramFiles\Tailscale\tailscale.exe"
         if(-not(Test-Path $tsExe)){ SendTG "❌ Tailscale exe not found after install"; return }
 
-        # 启动 Tailscale
+        # -----------------------------
+        # 启动 Tailscale，捕获错误
         try{
           $output = cmd /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
         }catch{
@@ -69,19 +70,22 @@ jobs:
         $text = $output | Out-String
         Write-Host $text
 
-        # AUTH_KEY 失效 → 推送登录链接
+        # -----------------------------
+        # NeedsLogin 自动处理
         $login=($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})
         if($login -and $login.Count -gt 0){
           SendTG "⚠️ TAILSCALE LOGIN REQUIRED`n$($login[0])"
         }
 
+        # -----------------------------
         # 获取 Tailscale IP
         $ipList = & "$tsExe" ip -4 2>$null
         if($ipList -and $ipList.Count -gt 0){
           $ip=$ipList[0]
           echo "TSIP=$ip" >> $env:GITHUB_ENV
+          SendTG "✅ Tailscale connected`nIP: $ip"
         }else{
-          SendTG "❌ No Tailscale IP obtained"
+          SendTG "⏳ Waiting for Tailscale IP (needs login or retry)"
         }
 
     # -----------------------------
