@@ -2,7 +2,7 @@ name: TG-Triggered-RDP
 
 on:
   repository_dispatch:
-    types: [open_rdp1]
+    types: [open_rdp]
 
 jobs:
   secure-rdp:
