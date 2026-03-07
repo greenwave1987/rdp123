@@ -139,7 +139,7 @@ def delete_old_keys(page):
         return await r.json();
     }
     """)
-    log(data)
+
 
     keys = data["data"]["authKeys"]
 
@@ -198,7 +198,6 @@ def create_authkey(page):
         return await res.json();
     }
     """)
-    log(result)
 
     key = result["data"]["fullKey"]
 
