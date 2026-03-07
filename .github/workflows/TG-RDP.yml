@@ -1,4 +1,4 @@
-name: TG-RDP-v4.1
+name: TG-RDP-v4.2
 
 on:
   repository_dispatch:
@@ -37,16 +37,14 @@ jobs:
     - name: Install Tailscale & Connect
       shell: powershell
       run: |
-        $global:ErrorActionPreference = "Continue"
+        $global:ErrorActionPreference="Continue"
 
         function SendTG($msg){
           try{
             $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
             $enc=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($msg))
             Invoke-RestMethod -Uri $url -Method Post -TimeoutSec 15 -ContentType "application/json" -Body (@{payload=$enc}|ConvertTo-Json)
-          }catch{
-            Write-Host "TG push failed"
-          }
+          }catch{ Write-Host "TG push failed" }
         }
 
         # 下载并安装 Tailscale
@@ -60,32 +58,38 @@ jobs:
         if(-not(Test-Path $tsExe)){ SendTG "❌ Tailscale exe not found after install"; return }
 
         # -----------------------------
-        # 启动 Tailscale，捕获所有错误
-        try{
-          $output = cmd /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=30s 2>&1"
-        }catch{
-          $output = $_.Exception.Message
-        }
+        # 工业级启动 Tailscale 并捕获输出
+        $outFile="$env:TEMP\tailscale_out.txt"
+        $errFile="$env:TEMP\tailscale_err.txt"
+        Start-Process -FilePath $tsExe -ArgumentList "up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset" -PassThru -Wait -NoNewWindow -RedirectStandardOutput $outFile -RedirectStandardError $errFile
 
-        $text = @($output | Out-String)
+        $text = @()
+        if(Test-Path $outFile){ $text += Get-Content $outFile }
+        if(Test-Path $errFile){ $text += Get-Content $errFile }
         Write-Host $text
 
         # -----------------------------
-        # NeedsLogin 自动推送 TG
+        # NeedsLogin 自动推送
         $login = @($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})
         if($login.Count -gt 0){
           SendTG "⚠️ TAILSCALE LOGIN REQUIRED`n$($login[0])"
         }
 
         # -----------------------------
-        # 安全获取 Tailscale IP
-        $ipList = @(& "$tsExe" ip -4 2>$null)
-        if($ipList.Count -gt 0){
-          $ip=$ipList[0]
+        # 循环重试获取 IP
+        $ip = $null
+        $retry = 0
+        while($retry -lt 30 -and -not $ip){
+            $ipList = @(& $tsExe ip -4 2>$null)
+            if($ipList.Count -gt 0){ $ip = $ipList[0]; break }
+            Start-Sleep 5
+            $retry++
+        }
+        if($ip){ 
           echo "TSIP=$ip" >> $env:GITHUB_ENV
           SendTG "✅ Tailscale connected`nIP: $ip"
         }else{
-          SendTG "⏳ Waiting for Tailscale IP (needs login or retry)"
+          SendTG "⏳ No Tailscale IP yet, please login manually"
         }
 
     # -----------------------------
