@@ -141,7 +141,7 @@ def delete_old_keys(page):
     """)
     log(data)
 
-    keys = data.get("keys", [])
+    keys = data["data"]["authKeys"]
 
     log(f"发现 {len(keys)} 个 Key")
 
@@ -198,7 +198,7 @@ def create_authkey(page):
         return await res.json();
     }
     """)
-    log(data)
+    log(result)
 
     key = result.get("key")
 
