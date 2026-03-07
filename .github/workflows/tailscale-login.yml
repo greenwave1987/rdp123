@@ -3,7 +3,7 @@ name: Auto Rotate Tailscale AuthKey
 on:
   schedule:
     # 每天凌晨 3 点自动执行
-    - cron: "0 3 * * *"
+    - cron: "0 3 * */2 *"
   workflow_dispatch:
 
 jobs:
