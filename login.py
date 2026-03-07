@@ -133,18 +133,25 @@ def delete_old_keys(page):
 
     log("获取旧 AuthKeys")
 
-    keys = page.evaluate("""
+    data = page.evaluate("""
     async () => {
         const r = await fetch("https://login.tailscale.com/admin/api/keys");
         return await r.json();
     }
     """)
 
+    keys = data.get("keys", [])
+
+    log(f"发现 {len(keys)} 个 Key")
+
     deleted = 0
 
     for k in keys:
 
         key_id = k.get("id")
+
+        if not key_id:
+            continue
 
         page.evaluate(f"""
         async () => {{
@@ -156,7 +163,7 @@ def delete_old_keys(page):
 
         deleted += 1
 
-    log(f"删除 {deleted} 个旧 Key")
+    log(f"已删除 {deleted} 个旧 Key")
 
 
 def create_authkey(page):
