@@ -24,4 +24,4 @@ jobs:
           GH_USER: ${{ secrets.GH_USER }}
           GH_PASS: ${{ secrets.GH_PASS }}
           GH_TOTP: ${{ secrets.GH_TOTP }}
-        run: python login.py
+        run: python get_keys.py
