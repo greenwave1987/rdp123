@@ -5,7 +5,6 @@ on:
     types: [open_rdp]
 
 jobs:
-
   rdp:
     runs-on: windows-latest
     timeout-minutes: 480
@@ -38,9 +37,8 @@ jobs:
     - name: Install Tailscale & Connect
       shell: powershell
       run: |
-        # 永远不 exit
         $ErrorActionPreference="Continue"
-        
+
         function SendTG($msg){
           try{
             $url="https://tg-github-bot.greenwave1987.workers.dev/callback"
@@ -50,33 +48,40 @@ jobs:
             Write-Host "TG push failed"
           }
         }
-        
-        # 启动 Tailscale（允许失败）
+
+        # 下载并安装 Tailscale
+        $pkg="$env:TEMP\tailscale.msi"
+        Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile $pkg
+        if(-not(Test-Path $pkg)){ SendTG "❌ Tailscale MSI download failed"; return }
+
+        Start-Process msiexec.exe -ArgumentList "/i `"$pkg`" /quiet /norestart" -Wait
+
+        $tsExe="$env:ProgramFiles\Tailscale\tailscale.exe"
+        if(-not(Test-Path $tsExe)){ SendTG "❌ Tailscale exe not found after install"; return }
+
+        # 启动 Tailscale
         try{
-          $output = cmd /c "`"$env:ProgramFiles\Tailscale\tailscale.exe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
+          $output = cmd /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp --reset --timeout=15s 2>&1"
         }catch{
-          Write-Host "tailscale up failed but continuing"
+          Write-Host "tailscale up failed, continuing"
         }
-        
+
         $text = $output | Out-String
         Write-Host $text
-        
-        # 如果需要登录，提取链接
-        $login=($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})[0]
-        
-        if($login){
-          Write-Host "TAILSCALE NEEDS LOGIN: $login"
-          SendTG ("TAILSCALE LOGIN`n"+$login)
+
+        # AUTH_KEY 失效 → 推送登录链接
+        $login=($text | Select-String -Pattern "https://login.tailscale.com/\S+" | ForEach-Object {$_.Matches.Value})
+        if($login -and $login.Count -gt 0){
+          SendTG "⚠️ TAILSCALE LOGIN REQUIRED`n$($login[0])"
         }
-        
-        # 尝试获取 IP
-        $ipList = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null
-        
-        if(!$ipList){
-          Write-Host "No Tailscale IP"
-        }else{
+
+        # 获取 Tailscale IP
+        $ipList = & "$tsExe" ip -4 2>$null
+        if($ipList -and $ipList.Count -gt 0){
           $ip=$ipList[0]
           echo "TSIP=$ip" >> $env:GITHUB_ENV
+        }else{
+          SendTG "❌ No Tailscale IP obtained"
         }
 
     # -----------------------------
@@ -123,4 +128,5 @@ jobs:
       if: always()
       shell: powershell
       run: |
-        & "$env:ProgramFiles\Tailscale\tailscale.exe" logout
+        $tsExe="$env:ProgramFiles\Tailscale\tailscale.exe"
+        if(Test-Path $tsExe){ & $tsExe logout }
