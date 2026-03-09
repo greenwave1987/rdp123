@@ -205,7 +205,7 @@ def create_authkey(page):
 
     key = result["data"]["fullKey"]
 
-    log(f"新 AuthKey: {mask_key(new_key_value)}")
+    log(f"新 AuthKey: {mask_key(key)}")
 
     return key
 
