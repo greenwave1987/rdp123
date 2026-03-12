@@ -134,7 +134,7 @@ jobs:
       - name: Install Clash for Windows
         shell: pwsh
         run: |
-          $releaseApi = 'https://api.github.com/repos/Fndroid/clash_for_windows_pkg/releases/latest'
+          $releaseApi = 'https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/latest'
           try {
               $release = Invoke-RestMethod -Uri $releaseApi -UseBasicParsing -TimeoutSec 15
               $version = $release.tag_name -replace '^v', ''
