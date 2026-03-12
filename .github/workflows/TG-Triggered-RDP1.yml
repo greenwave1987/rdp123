@@ -6,7 +6,6 @@ on:
 
 env:
   RDP_USER:      RDP
-  # 使用双引号定义，确保 PowerShell 在调用时能正确识别空格路径
   TAILSCALE_BIN: "C:\\Program Files\\Tailscale\\tailscale.exe"
   CALLBACK_URL:  https://tg-github-bot.greenwave1987.workers.dev/callback
   DEFAULT_DURATION_MIN: 60
@@ -21,27 +20,16 @@ jobs:
       - name: Enable RDP
         shell: pwsh
         run: |
-          Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-            -Name fDenyTSConnections -Value 0 -Force
-
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
           $rdpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
           Set-ItemProperty -Path $rdpPath -Name UserAuthentication -Value 1 -Force
-          Set-ItemProperty -Path $rdpPath -Name SecurityLayer       -Value 2 -Force
-
+          Set-ItemProperty -Path $rdpPath -Name SecurityLayer -Value 2 -Force
+          
           $ruleName = 'RDP-Tailscale'
           Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-          New-NetFirewallRule `
-            -DisplayName  $ruleName `
-            -Direction    Inbound `
-            -Protocol      TCP `
-            -LocalPort    3389 `
-            -RemoteAddress 100.64.0.0/10 `
-            -Action        Allow `
-            -Profile      Any | Out-Null
-
+          New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort 3389 -RemoteAddress 100.64.0.0/10 -Action Allow -Profile Any | Out-Null
           Restart-Service TermService -Force
-          Write-Host "✅ RDP 已启用 (Tailscale ACL 限定)"
+          Write-Host "✅ RDP 已配置"
 
       # ── 2. 创建 RDP 用户 ─────────────────────────────────────────────────
       - name: Create RDP User
@@ -51,21 +39,14 @@ jobs:
         run: |
           Write-Host "::add-mask::$env:RDP_PASSWORD"
           $securePass = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
-
           if (-not (Get-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue)) {
-              New-LocalUser `
-                -Name                $env:RDP_USER `
-                -Password            $securePass `
-                -AccountNeverExpires `
-                -PasswordNeverExpires
+              New-LocalUser -Name $env:RDP_USER -Password $securePass -AccountNeverExpires -PasswordNeverExpires
           } else {
               Set-LocalUser -Name $env:RDP_USER -Password $securePass
           }
-
           foreach ($group in 'Administrators', 'Remote Desktop Users') {
               Add-LocalGroupMember -Group $group -Member $env:RDP_USER -ErrorAction SilentlyContinue
           }
-          Write-Host "✅ 用户 $env:RDP_USER 配置完成"
 
       # ── 3. 安装并连接 Tailscale ──────────────────────────────────────────
       - name: Install and Connect Tailscale
@@ -75,116 +56,88 @@ jobs:
         run: |
           Write-Host "::add-mask::$env:TS_AUTHKEY"
           $installer = Join-Path $env:TEMP 'tailscale.msi'
-          $tsUrl     = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
-
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installer -UseBasicParsing
+          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $installer -UseBasicParsing
           Start-Process msiexec.exe -ArgumentList "/i `"$installer`" /quiet /norestart" -Wait
 
-          # 使用引号包裹路径调用
           & "$env:TAILSCALE_BIN" up --authkey="$env:TS_AUTHKEY" --hostname='rdp' --reset
-
+          
           $tsIP = $null
           for ($i = 0; $i -lt 15; $i++) {
               Start-Sleep 2
               $tsIP = & "$env:TAILSCALE_BIN" ip -4 2>$null
               if ($tsIP -match '^\d+\.\d+\.\d+\.\d+$') { break }
           }
-          
-          if (-not $tsIP) { throw "❌ Tailscale 获取 IP 失败" }
-          Write-Host "✅ Tailscale IP: $tsIP"
+          if (-not $tsIP) { throw "❌ Tailscale IP 获取失败" }
           "TAILSCALE_IP=$tsIP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "✅ Tailscale IP: $tsIP"
 
       # ── 4. 回调 Telegram ─────────────────────────────────────────────────
       - name: Notify Telegram
         if: always()
         shell: pwsh
         run: |
-          $chatId = "${{ github.event.client_payload.chat_id }}"
-          $duration = "${{ github.event.client_payload.duration }}"
-          $payload = "IP:$($env:TAILSCALE_IP)|ID:$chatId|TIME:$duration"
+          $payload = "IP:$($env:TAILSCALE_IP)|ID:${{ github.event.client_payload.chat_id }}|TIME:${{ github.event.client_payload.duration }}"
           $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
-          
           $body = @{ payload = $encoded } | ConvertTo-Json
           try {
               Invoke-RestMethod -Uri $env:CALLBACK_URL -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
-              Write-Host "✅ Telegram 回调成功"
-          } catch {
-              Write-Warning "⚠️ 回调失败: $_"
-          }
+          } catch { Write-Warning "⚠️ 回调失败" }
 
-      # ── 5. 安装 Clash for Windows (使用免安装解压版，防止安装卡死) ──────
-      - name: Install Clash for Windows
+      # ── 5. 安装并运行 Mihomo (修复缩进问题) ─────────────────────────────
+      - name: Install and Run Mihomo
         shell: pwsh
         run: |
-          # 使用 7z 压缩包版本，更适合自动化环境
-          $dlUrl = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/0.20.39.3/Clash.for.Windows-0.20.39-Opt.3-win.7z"
-          $destFile = Join-Path $env:TEMP "clash.7z"
-          $extractDir = "C:\Clash"
-
-          Write-Host "📦 正在下载 Clash 免安装版..."
-          Invoke-WebRequest -Uri $dlUrl -OutFile $destFile -UseBasicParsing
-
-          Write-Host "📦 正在解压..."
-          if (-not (Test-Path $extractDir)) { New-Item -ItemType Directory -Path $extractDir }
-          # Windows Runner 自带 7z 命令行
-          & 7z x $destFile "-o$extractDir" -y | Out-Null
-
-          # 定位 exe 路径
-          $cfwExe = Join-Path $extractDir "Clash for Windows.exe"
-
-          # 准备配置文件目录
-          $profileDir = Join-Path $env:APPDATA 'clash'
-          if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force }
+          $mihomoDir = "C:\Mihomo"
+          if (-not (Test-Path $mihomoDir)) { New-Item -ItemType Directory -Path $mihomoDir -Force }
           
-          @"
-          mixed-port: 7890
-          allow-lan: true
-          mode: rule
-          log-level: warning
-          external-controller: 127.0.0.1:9090
-          proxies: []
-          proxy-groups: []
-          rules:
-            - MATCH,DIRECT
-          "@ | Out-File -FilePath (Join-Path $profileDir 'config.yaml') -Encoding utf8
+          # 下载与解压
+          $dlUrl = "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-windows-amd64-v1.18.9.zip"
+          $zipFile = Join-Path $mihomoDir "mihomo.zip"
+          Invoke-WebRequest -Uri $dlUrl -OutFile $zipFile -UseBasicParsing
+          & 7z x $zipFile -o$mihomoDir -y | Out-Null
+          $exe = Get-ChildItem -Path $mihomoDir -Filter "mihomo-*.exe" | Select-Object -First 1
+          Rename-Item -Path $exe.FullName -NewName "mihomo.exe"
 
-          if (Test-Path $cfwExe) {
-              Write-Host "🚀 启动 Clash..."
-              # 使用 Start-Process 并在后台运行
-              Start-Process -FilePath $cfwExe -WindowStyle Minimized
-              Write-Host "✅ Clash 已在后台就绪"
-          } else {
-              Write-Error "❌ 找不到 Clash 执行文件"
-          }
+          # 关键：使用数组组合字符串，彻底避开 YAML 这里的缩进陷阱
+          $configLines = @(
+            "mixed-port: 7890",
+            "allow-lan: true",
+            "mode: rule",
+            "log-level: info",
+            "external-controller: 0.0.0.0:9090",
+            "secret: ''",
+            "proxies: []",
+            "proxy-groups:",
+            "  - name: PROXY",
+            "    type: select",
+            "    proxies:",
+            "      - DIRECT",
+            "rules:",
+            "  - MATCH,DIRECT"
+          )
+          $configLines | Set-Content -Path (Join-Path $mihomoDir "config.yaml") -Encoding UTF8
+
+          # 后台运行
+          Start-Process -FilePath "$mihomoDir\mihomo.exe" -ArgumentList "-d $mihomoDir" -WindowStyle Hidden
+          Write-Host "✅ Mihomo 已后台启动 (端口 7890)"
 
       # ── 6. 保持存活 ──────────────────────────────────────────────────────
       - name: Keep Alive
         shell: pwsh
         run: |
-          $rawDuration = "${{ github.event.client_payload.duration }}"
-          $durationMin = if ([string]::IsNullOrWhiteSpace($rawDuration) -or -not [int]::TryParse($rawDuration, [ref]$null)) {
-              [int]$env:DEFAULT_DURATION_MIN
-          } else {
-              [int]$rawDuration
-          }
-
-          $durationMin = [Math]::Min($durationMin, 355)
-          $endTime = (Get-Date).AddMinutes($durationMin)
-          Write-Host "⏳ 会话开始，结束时间: $endTime"
-
+          $raw = "${{ github.event.client_payload.duration }}"
+          $min = if ([string]::IsNullOrWhiteSpace($raw) -or -not [int]::TryParse($raw, [ref]$null)) { [int]$env:DEFAULT_DURATION_MIN } else { [int]$raw }
+          $endTime = (Get-Date).AddMinutes([Math]::Min($min, 355))
           while ((Get-Date) -lt $endTime) {
-              $rem = [int]($endTime - (Get-Date)).TotalMinutes
-              Write-Host "$(Get-Date -Format 'HH:mm:ss') - 剩余 $rem 分钟"
+              Write-Host "$(Get-Date -Format 'HH:mm:ss') 剩余 $(([int]($endTime - (Get-Date)).TotalMinutes)) 分钟"
               Start-Sleep 120
           }
 
-      # ── 7. 清理阶段 ──────────────────────────────────────────────────────
+      # ── 7. 清理 ──────────────────────────────────────────────────────────
       - name: Cleanup
         if: always()
         shell: pwsh
         run: |
-          try { & "$env:TAILSCALE_BIN" logout } catch { }
-          Get-Process -Name 'Clash for Windows' -ErrorAction SilentlyContinue | Stop-Process -Force
-          Disable-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue
+          try { & "$env:TAILSCALE_BIN" logout } catch {}
+          Get-Process -Name "mihomo" -ErrorAction SilentlyContinue | Stop-Process -Force
           Remove-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue
-          Write-Host "🧹 环境已清理"
