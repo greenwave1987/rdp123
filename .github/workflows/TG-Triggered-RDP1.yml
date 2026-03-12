@@ -134,13 +134,7 @@ jobs:
       - name: Install Clash for Windows
         shell: pwsh
         run: |
-          $releaseApi = 'https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/latest'
-          try {
-              $release = Invoke-RestMethod -Uri $releaseApi -UseBasicParsing -TimeoutSec 15
-              $version = $release.tag_name -replace '^v', ''
-          } catch {
-              $version = '0.20.39.3'
-          }
+
 
           $fileName  = "Clash.for.Windows.Setup.0.20.39_Opt-3.exe"
           $dlUrl     = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/$version/$fileName"
