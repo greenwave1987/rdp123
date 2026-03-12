@@ -117,7 +117,7 @@ jobs:
         shell: pwsh
         run: |
           # 使用 7z 压缩包版本，更适合自动化环境
-          $dlUrl = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/0.20.39.3/Clash.for.Windows-0.20.39.3-win.7z"
+          $dlUrl = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/0.20.39.3/Clash.for.Windows-0.20.39-Opt.3-win.7z"
           $destFile = Join-Path $env:TEMP "clash.7z"
           $extractDir = "C:\Clash"
 
