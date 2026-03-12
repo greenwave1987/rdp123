@@ -83,33 +83,44 @@ jobs:
               Invoke-RestMethod -Uri $env:CALLBACK_URL -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
           } catch { Write-Warning "⚠️ 回调失败" }
 
-      # ── 5. 安装并运行 Mihomo ─────────────────────────────────────────────
+      # ── 5. 安装并运行 Mihomo (暴力搜索版) ───────────────────────────────
       - name: Install and Run Mihomo
         shell: pwsh
         run: |
           $mihomoDir = "C:\Mihomo"
           if (-not (Test-Path $mihomoDir)) { New-Item -ItemType Directory -Path $mihomoDir -Force }
           
-          # 下载
+          # 1. 下载
           $dlUrl = "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-windows-amd64-v1.18.9.zip"
           $zipFile = Join-Path $mihomoDir "mihomo.zip"
+          Write-Host "📦 正在下载 Mihomo..."
           Invoke-WebRequest -Uri $dlUrl -OutFile $zipFile -UseBasicParsing
           
-          # 解压
-          & 7z x $zipFile -o$mihomoDir -y | Out-Null
+          # 2. 解压 (显式切换目录执行)
+          Write-Host "📦 正在解压..."
+          Set-Location $mihomoDir
+          & 7z x $zipFile -y | Out-Null
           
-          # 直接查找目录下的第一个 exe 文件，不再管它叫什么名字
-          $foundExe = Get-ChildItem -Path $mihomoDir -Filter "*.exe" -Recurse | Select-Object -First 1
+          # 3. 【强力查找】全量递归查找并列出结果
+          Write-Host "🔍 正在全盘搜索 exe..."
+          $allExes = Get-ChildItem -Path $mihomoDir -Filter "*.exe" -Recurse
+          $foundExe = $allExes | Select-Object -First 1
           
-          if ($null -eq $foundExe) { throw "❌ 找不到 exe 文件" }
+          if ($null -eq $foundExe) {
+              Write-Host "❌ 依然找不到 exe。当前目录结构如下："
+              Get-ChildItem -Path $mihomoDir -Recurse
+              throw "Stopping: No exe found after extraction."
+          }
           
-          # 重命名为 mihomo.exe 方便调用
+          Write-Host "✅ 找到文件: $($foundExe.FullName)"
+          
+          # 4. 移动到根目录
           $finalExe = Join-Path $mihomoDir "mihomo.exe"
           if ($foundExe.FullName -ne $finalExe) {
               Move-Item -Path $foundExe.FullName -Destination $finalExe -Force
           }
 
-          # 写入配置文件
+          # 5. 写入配置文件
           $configLines = @(
             "mixed-port: 7890",
             "allow-lan: true",
@@ -128,9 +139,9 @@ jobs:
           )
           $configLines | Set-Content -Path (Join-Path $mihomoDir "config.yaml") -Encoding UTF8
 
-          # 后台运行
-          Start-Process -FilePath $finalExe -ArgumentList "-d $mihomoDir" -WindowStyle Hidden
-          Write-Host "✅ Mihomo 已就绪"
+          # 6. 后台运行 (显式指定工作目录)
+          Write-Host "🚀 启动 Mihomo..."
+          Start-Process -FilePath $finalExe -ArgumentList "-d $mihomoDir" -WorkingDirectory $mihomoDir -WindowStyle Hidden
 
       # ── 6. 保持存活 ──────────────────────────────────────────────────────
       - name: Keep Alive
