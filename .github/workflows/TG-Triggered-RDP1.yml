@@ -6,7 +6,8 @@ on:
 
 env:
   RDP_USER:      RDP
-  TAILSCALE_BIN: "$env:ProgramFiles\\Tailscale\\tailscale.exe"
+  # 使用直接路径，避免 $env:ProgramFiles 在变量声明时的解析歧义
+  TAILSCALE_BIN: "C:\\Program Files\\Tailscale\\tailscale.exe"
   CALLBACK_URL:  https://tg-github-bot.greenwave1987.workers.dev/callback
   DEFAULT_DURATION_MIN: 60
 
@@ -16,31 +17,27 @@ jobs:
     timeout-minutes: 360
 
     steps:
-
       # ── 1. 启用 RDP（仅允许 Tailscale 网段访问）─────────────────────────
       - name: Enable RDP
         shell: pwsh
         run: |
-          # 开启远程桌面
           Set-ItemProperty `
             -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
             -Name fDenyTSConnections -Value 0 -Force
 
-          # 强制启用网络级别身份验证(NLA) + TLS 安全层
           $rdpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
           Set-ItemProperty -Path $rdpPath -Name UserAuthentication -Value 1 -Force
-          Set-ItemProperty -Path $rdpPath -Name SecurityLayer       -Value 2 -Force   # 2=TLS，比原来的1(协商)更严格
+          Set-ItemProperty -Path $rdpPath -Name SecurityLayer       -Value 2 -Force
 
-          # 防火墙：仅允许 Tailscale CGNAT 段（100.64.0.0/10）
           $ruleName = 'RDP-Tailscale'
           Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
           New-NetFirewallRule `
             -DisplayName  $ruleName `
             -Direction    Inbound `
-            -Protocol     TCP `
+            -Protocol      TCP `
             -LocalPort    3389 `
             -RemoteAddress 100.64.0.0/10 `
-            -Action       Allow `
+            -Action        Allow `
             -Profile      Any | Out-Null
 
           Restart-Service TermService -Force
@@ -52,20 +49,17 @@ jobs:
         env:
           RDP_PASSWORD: ${{ secrets.PASSWORD }}
         run: |
-          # 将密码加入 Actions 掩码，防止日志泄漏
           Write-Host "::add-mask::$env:RDP_PASSWORD"
-
           $securePass = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
 
           if (-not (Get-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue)) {
               New-LocalUser `
-                -Name               $env:RDP_USER `
-                -Password           $securePass `
+                -Name                $env:RDP_USER `
+                -Password            $securePass `
                 -AccountNeverExpires `
-                -PasswordNeverExpires  # 避免 session 期间密码过期
+                -PasswordNeverExpires
               Write-Host "✅ 用户 $env:RDP_USER 创建成功"
           } else {
-              # 若用户已存在，刷新密码确保一致
               Set-LocalUser -Name $env:RDP_USER -Password $securePass
               Write-Host "ℹ️ 用户 $env:RDP_USER 已存在，密码已刷新"
           }
@@ -85,35 +79,23 @@ jobs:
           $installer = Join-Path $env:TEMP 'tailscale.msi'
           $tsUrl     = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
 
-          # 带重试的下载
-          $maxRetry = 3
-          for ($i = 1; $i -le $maxRetry; $i++) {
-              try {
-                  Invoke-WebRequest -Uri $tsUrl -OutFile $installer -UseBasicParsing
-                  break
-              } catch {
-                  if ($i -eq $maxRetry) { throw "下载 Tailscale 失败: $_" }
-                  Write-Warning "下载失败，第 $i 次重试..."
-                  Start-Sleep 5
-              }
-          }
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installer -UseBasicParsing
 
           Start-Process msiexec.exe `
             -ArgumentList "/i `"$installer`" /quiet /norestart" `
             -Wait -PassThru | Out-Null
 
-          # 连接 Tailscale
-          & $env:TAILSCALE_BIN up `
+          # 关键点：使用双引号包裹变量以处理路径空格
+          & "$env:TAILSCALE_BIN" up `
             --authkey="$env:TS_AUTHKEY" `
             --hostname='github-rdp' `
             --ssh=false `
             --reset
 
-          # 等待 IP 分配（最多 30 秒）
           $tsIP = $null
           for ($i = 0; $i -lt 15; $i++) {
               Start-Sleep 2
-              $tsIP = & $env:TAILSCALE_BIN ip -4 2>$null
+              $tsIP = & "$env:TAILSCALE_BIN" ip -4 2>$null
               if ($tsIP -match '^\d+\.\d+\.\d+\.\d+$') { break }
           }
 
@@ -130,12 +112,7 @@ jobs:
         shell: pwsh
         run: |
           $payload = "IP:$($env:TAILSCALE_IP)|ID:${{ github.event.client_payload.chat_id }}|TIME:${{ github.event.client_payload.duration }}"
-
-          # Base64 编码防止特殊字符干扰传输
-          $encoded = [Convert]::ToBase64String(
-              [System.Text.Encoding]::UTF8.GetBytes($payload)
-          )
-
+          $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
           $body = [ordered]@{ payload = $encoded } | ConvertTo-Json
 
           $params = @{
@@ -151,176 +128,84 @@ jobs:
               Write-Host "✅ Telegram 回调成功: $res"
           } catch {
               Write-Warning "⚠️ Telegram 回调失败: $_"
-              # 非致命错误，不中断流程
           }
 
-      # ── 5. 安装 Clash for Windows（混合代理模式，端口 7890）──────────────
+      # ── 5. 安装 Clash for Windows ────────────────────────────────────────
       - name: Install Clash for Windows
         shell: pwsh
         run: |
-          # ── 获取最新版本号 ────────────────────────────────────────────────
           $releaseApi = 'https://api.github.com/repos/Fndroid/clash_for_windows_pkg/releases/latest'
           try {
               $release = Invoke-RestMethod -Uri $releaseApi -UseBasicParsing -TimeoutSec 15
               $version = $release.tag_name -replace '^v', ''
           } catch {
               $version = '0.20.39'
-              Write-Warning "无法获取最新版本，回退到 $version"
           }
 
           $fileName  = "Clash.for.Windows.Setup.$version.exe"
           $dlUrl     = "https://github.com/Fndroid/clash_for_windows_pkg/releases/download/$version/$fileName"
           $installer = Join-Path $env:TEMP $fileName
 
-          Write-Host "📦 下载 Clash for Windows v$version ..."
+          Invoke-WebRequest -Uri $dlUrl -OutFile $installer -UseBasicParsing
 
-          # ── 带重试的下载 ──────────────────────────────────────────────────
-          $maxRetry = 3
-          for ($i = 1; $i -le $maxRetry; $i++) {
-              try {
-                  Invoke-WebRequest -Uri $dlUrl -OutFile $installer -UseBasicParsing
-                  Write-Host "✅ 下载完成"
-                  break
-              } catch {
-                  if ($i -eq $maxRetry) { throw "❌ 下载 Clash for Windows 失败: $_" }
-                  Write-Warning "下载失败，第 $i 次重试..."
-                  Start-Sleep 5
-              }
-          }
-
-          # ── 静默安装（/S = NSIS 静默模式）────────────────────────────────
-          Write-Host "⚙️ 正在安装..."
           $proc = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
-          if ($proc.ExitCode -ne 0) {
-              throw "❌ 安装失败，退出码: $($proc.ExitCode)"
-          }
-          Write-Host "✅ Clash for Windows 安装完成"
-
-          # ── 定位安装目录 ──────────────────────────────────────────────────
+          
           $cfwDir = "${env:LOCALAPPDATA}\Programs\Clash for Windows"
-          if (-not (Test-Path $cfwDir)) {
-              $cfwDir = "${env:ProgramFiles}\Clash for Windows"
-          }
+          if (-not (Test-Path $cfwDir)) { $cfwDir = "${env:ProgramFiles}\Clash for Windows" }
           $cfwExe = Join-Path $cfwDir 'Clash for Windows.exe'
-          if (-not (Test-Path $cfwExe)) {
-              throw "❌ 找不到 Clash for Windows 可执行文件: $cfwExe"
-          }
-          "CFW_DIR=$cfwDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          # ── 写入最简 config.yaml（混合代理端口 7890）─────────────────────
           $profileDir = Join-Path $env:APPDATA 'clash'
           New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-
+          
           $minimalConfig = @"
           mixed-port: 7890
           allow-lan: true
           mode: rule
           log-level: warning
           external-controller: 127.0.0.1:9090
-          
-          # 此配置仅用于初始化，尚未添加任何代理节点。
-          # 请通过 RDP 连接后，在 Clash 界面导入订阅或粘贴配置。
           proxies: []
           proxy-groups: []
           rules:
             - MATCH,DIRECT
           "@
-          $configPath = Join-Path $profileDir 'config.yaml'
-          if (-not (Test-Path $configPath)) {
-              $minimalConfig | Out-File -FilePath $configPath -Encoding utf8
-              Write-Host "📄 已写入初始配置: $configPath"
-          } else {
-              Write-Host "ℹ️ 已存在配置文件，跳过写入: $configPath"
-          }
+          $minimalConfig | Out-File -FilePath (Join-Path $profileDir 'config.yaml') -Encoding utf8
 
-          # ── 启动 Clash for Windows ────────────────────────────────────────
-          Write-Host "🚀 启动 Clash for Windows..."
           Start-Process -FilePath $cfwExe -WindowStyle Minimized
-
-          # 等待核心就绪（最多 20 秒，轮询 REST API）
-          $ready = $false
-          for ($i = 0; $i -lt 10; $i++) {
-              Start-Sleep 2
-              try {
-                  $res = Invoke-RestMethod -Uri 'http://127.0.0.1:9090/version' -TimeoutSec 2
-                  Write-Host "✅ Clash 核心已就绪，版本: $($res.version)"
-                  $ready = $true
-                  break
-              } catch { }
-          }
-          if (-not $ready) { Write-Warning "⚠️ Clash 核心未响应，可能仍在启动中" }
-
-          # ── 通过 REST API 确认 Rule 模式 ──────────────────────────────────
-          try {
-              Invoke-RestMethod `
-                -Uri    'http://127.0.0.1:9090/configs' `
-                -Method Patch `
-                -ContentType 'application/json' `
-                -Body   '{"mode":"rule"}' | Out-Null
-              Write-Host "✅ 已通过 API 确认规则模式"
-          } catch {
-              Write-Warning "⚠️ 无法通过 API 设置模式（无节点时属正常）: $_"
-          }
-
-          Write-Host ""
-          Write-Host "══════════════════════════════════════════"
-          Write-Host "  Clash for Windows 已就绪"
-          Write-Host "  混合代理端口 : 7890  (HTTP + SOCKS5)"
-          Write-Host "  管理界面     : http://127.0.0.1:9090"
-          Write-Host "  当前节点     : 无（请 RDP 后导入订阅）"
-          Write-Host "══════════════════════════════════════════"
 
       # ── 6. 保持会话存活 ──────────────────────────────────────────────────
       - name: Keep Alive
         shell: pwsh
         run: |
           $rawDuration = "${{ github.event.client_payload.duration }}"
-          $durationMin = if ([string]::IsNullOrWhiteSpace($rawDuration) -or
-                             -not [int]::TryParse($rawDuration, [ref]$null)) {
-              $env:DEFAULT_DURATION_MIN
+          $durationMin = if ([string]::IsNullOrWhiteSpace($rawDuration) -or -not [int]::TryParse($rawDuration, [ref]$null)) {
+              [int]$env:DEFAULT_DURATION_MIN
           } else {
               [int]$rawDuration
           }
 
-          # 上限保护，不超过 job timeout（360 分钟）留 5 分钟收尾
           $durationMin = [Math]::Min($durationMin, 355)
-
           $endTime = (Get-Date).AddMinutes($durationMin)
-          Write-Host "⏳ 会话将持续到: $endTime（$durationMin 分钟）"
+          Write-Host "⏳ 会话将持续到: $endTime"
 
           while ((Get-Date) -lt $endTime) {
               $remaining = [int]($endTime - (Get-Date)).TotalMinutes
-              Write-Host "$(Get-Date -Format 'HH:mm:ss') 剩余约 $remaining 分钟"
+              Write-Host "$(Get-Date -Format 'HH:mm:ss') 剩余 $remaining 分钟"
               Start-Sleep 120
           }
-          Write-Host "✅ 会话时间结束"
 
-      # ── 6. 清理（始终执行）────────────────────────────────────────────────
+      # ── 7. 清理（始终执行）────────────────────────────────────────────────
       - name: Cleanup
         if: always()
         shell: pwsh
         run: |
-          # 登出 Tailscale
           try {
-              & $env:TAILSCALE_BIN logout
+              # 同样需要双引号包裹
+              & "$env:TAILSCALE_BIN" logout
               Write-Host "✅ Tailscale 已登出"
-          } catch {
-              Write-Warning "Tailscale 登出失败: $_"
-          }
+          } catch { }
 
-          # 禁用 RDP，恢复初始状态
-          Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-            -Name fDenyTSConnections -Value 1 -Force
-
-          # 删除 RDP 专用防火墙规则
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 1 -Force
           Remove-NetFirewallRule -DisplayName 'RDP-Tailscale' -ErrorAction SilentlyContinue
-
-          # 终止 Clash for Windows 进程
           Get-Process -Name 'Clash for Windows' -ErrorAction SilentlyContinue | Stop-Process -Force
-          Write-Host "✅ Clash 已终止"
-
-          # 禁用并删除临时用户
-          Disable-LocalUser  -Name $env:RDP_USER -ErrorAction SilentlyContinue
-          Remove-LocalUser   -Name $env:RDP_USER -ErrorAction SilentlyContinue
-          Write-Host "✅ 清理完成"
+          Disable-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue
+          Remove-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue
