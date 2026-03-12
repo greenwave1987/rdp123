@@ -81,7 +81,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i `"$installer`" /quiet /norestart" -Wait
 
           # 使用引号包裹路径调用
-          & "$env:TAILSCALE_BIN" up --authkey="$env:TS_AUTHKEY" --hostname='github-rdp' --reset
+          & "$env:TAILSCALE_BIN" up --authkey="$env:TS_AUTHKEY" --hostname='rdp' --reset
 
           $tsIP = $null
           for ($i = 0; $i -lt 15; $i++) {
