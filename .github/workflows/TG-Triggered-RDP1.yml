@@ -142,8 +142,9 @@ jobs:
               $version = '0.20.39.3'
           }
 
-          $fileName  = "Clash.for.Windows.Setup.$version.exe"
-          $dlUrl     = "https://github.com/Fndroid/clash_for_windows_pkg/releases/download/$version/$fileName"
+          $fileName  = "Clash.for.Windows.Setup.0.20.39_Opt-3.exe"
+          $dlUrl     = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/$version/$fileName"
+
           $installer = Join-Path $env:TEMP $fileName
 
           Invoke-WebRequest -Uri $dlUrl -OutFile $installer -UseBasicParsing
