@@ -112,25 +112,27 @@ jobs:
               Write-Warning "⚠️ 回调失败: $_"
           }
 
-      # ── 5. 安装 Clash for Windows (修复版下载链接) ────────────────────────
+      # ── 5. 安装 Clash for Windows (使用免安装解压版，防止安装卡死) ──────
       - name: Install Clash for Windows
         shell: pwsh
         run: |
-          # 使用 Z-Siqi 的汉化备份仓库，此链接目前依然有效
-          $dlUrl = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/0.20.39.3/Clash.for.Windows.Setup.0.20.39_Opt-3.exe"
-          $installer = Join-Path $env:TEMP "clash-setup.exe"
+          # 使用 7z 压缩包版本，更适合自动化环境
+          $dlUrl = "https://github.com/Z-Siqi/Clash-for-Windows_Chinese/releases/download/0.20.39.3/Clash.for.Windows-0.20.39.3-win.7z"
+          $destFile = Join-Path $env:TEMP "clash.7z"
+          $extractDir = "C:\Clash"
 
-          Write-Host "📦 正在下载 Clash (备份源)..."
-          Invoke-WebRequest -Uri $dlUrl -OutFile $installer -UseBasicParsing
+          Write-Host "📦 正在下载 Clash 免安装版..."
+          Invoke-WebRequest -Uri $dlUrl -OutFile $destFile -UseBasicParsing
 
-          Write-Host "⚙️ 正在静默安装..."
-          $proc = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          Write-Host "📦 正在解压..."
+          if (-not (Test-Path $extractDir)) { New-Item -ItemType Directory -Path $extractDir }
+          # Windows Runner 自带 7z 命令行
+          & 7z x $destFile "-o$extractDir" -y | Out-Null
 
-          $cfwDir = "${env:LOCALAPPDATA}\Programs\Clash for Windows"
-          if (-not (Test-Path $cfwDir)) { $cfwDir = "${env:ProgramFiles}\Clash for Windows" }
-          $cfwExe = Join-Path $cfwDir 'Clash for Windows.exe'
+          # 定位 exe 路径
+          $cfwExe = Join-Path $extractDir "Clash for Windows.exe"
 
-          # 写入基础配置
+          # 准备配置文件目录
           $profileDir = Join-Path $env:APPDATA 'clash'
           if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force }
           
@@ -147,8 +149,12 @@ jobs:
           "@ | Out-File -FilePath (Join-Path $profileDir 'config.yaml') -Encoding utf8
 
           if (Test-Path $cfwExe) {
+              Write-Host "🚀 启动 Clash..."
+              # 使用 Start-Process 并在后台运行
               Start-Process -FilePath $cfwExe -WindowStyle Minimized
-              Write-Host "✅ Clash 已启动"
+              Write-Host "✅ Clash 已在后台就绪"
+          } else {
+              Write-Error "❌ 找不到 Clash 执行文件"
           }
 
       # ── 6. 保持存活 ──────────────────────────────────────────────────────
