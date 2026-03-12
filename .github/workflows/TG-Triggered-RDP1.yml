@@ -83,39 +83,33 @@ jobs:
               Invoke-RestMethod -Uri $env:CALLBACK_URL -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
           } catch { Write-Warning "⚠️ 回调失败" }
 
-      # ── 5. 安装并运行 Mihomo (修复文件查找逻辑) ──────────────────────────
+      # ── 5. 安装并运行 Mihomo ─────────────────────────────────────────────
       - name: Install and Run Mihomo
         shell: pwsh
         run: |
           $mihomoDir = "C:\Mihomo"
           if (-not (Test-Path $mihomoDir)) { New-Item -ItemType Directory -Path $mihomoDir -Force }
           
-          # 1. 下载
+          # 下载
           $dlUrl = "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-windows-amd64-v1.18.9.zip"
           $zipFile = Join-Path $mihomoDir "mihomo.zip"
-          Write-Host "📦 正在下载 Mihomo..."
           Invoke-WebRequest -Uri $dlUrl -OutFile $zipFile -UseBasicParsing
           
-          # 2. 解压
-          Write-Host "📦 正在解压..."
+          # 解压
           & 7z x $zipFile -o$mihomoDir -y | Out-Null
           
-          # 3. 【修复点】强力查找 exe
-          # 遍历解压目录及其子目录，寻找包含 "mihomo" 的 exe
-          $exe = Get-ChildItem -Path $mihomoDir -Filter "*.exe" -Recurse | Where-Object { $_.Name -like "*mihomo*" } | Select-Object -First 1
+          # 直接查找目录下的第一个 exe 文件，不再管它叫什么名字
+          $foundExe = Get-ChildItem -Path $mihomoDir -Filter "*.exe" -Recurse | Select-Object -First 1
           
-          if ($null -eq $exe) {
-              Write-Error "❌ 在解压目录中找不到 mihomo 执行文件！"
-              Get-ChildItem -Path $mihomoDir -Recurse # 列出文件结构便于调试
-              exit 1
+          if ($null -eq $foundExe) { throw "❌ 找不到 exe 文件" }
+          
+          # 重命名为 mihomo.exe 方便调用
+          $finalExe = Join-Path $mihomoDir "mihomo.exe"
+          if ($foundExe.FullName -ne $finalExe) {
+              Move-Item -Path $foundExe.FullName -Destination $finalExe -Force
           }
 
-          # 移动并重命名到根目录
-          $finalExe = Join-Path $mihomoDir "mihomo.exe"
-          Move-Item -Path $exe.FullName -Destination $finalExe -Force
-          Write-Host "✅ 已定位内核: $($finalExe)"
-
-          # 4. 写入配置文件
+          # 写入配置文件
           $configLines = @(
             "mixed-port: 7890",
             "allow-lan: true",
@@ -134,9 +128,9 @@ jobs:
           )
           $configLines | Set-Content -Path (Join-Path $mihomoDir "config.yaml") -Encoding UTF8
 
-          # 5. 后台运行
-          Write-Host "🚀 启动 Mihomo 内核..."
+          # 后台运行
           Start-Process -FilePath $finalExe -ArgumentList "-d $mihomoDir" -WindowStyle Hidden
+          Write-Host "✅ Mihomo 已就绪"
 
       # ── 6. 保持存活 ──────────────────────────────────────────────────────
       - name: Keep Alive
@@ -145,8 +139,10 @@ jobs:
           $raw = "${{ github.event.client_payload.duration }}"
           $min = if ([string]::IsNullOrWhiteSpace($raw) -or -not [int]::TryParse($raw, [ref]$null)) { [int]$env:DEFAULT_DURATION_MIN } else { [int]$raw }
           $endTime = (Get-Date).AddMinutes([Math]::Min($min, 355))
+          Write-Host "⏳ 保持存活直到: $endTime"
           while ((Get-Date) -lt $endTime) {
-              Write-Host "$(Get-Date -Format 'HH:mm:ss') 剩余 $(([int]($endTime - (Get-Date)).TotalMinutes)) 分钟"
+              $rem = [int]($endTime - (Get-Date)).TotalMinutes
+              Write-Host "$(Get-Date -Format 'HH:mm:ss') 剩余 $rem 分钟"
               Start-Sleep 120
           }
 
