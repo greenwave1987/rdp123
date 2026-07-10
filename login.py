@@ -178,7 +178,7 @@ def create_authkey(page):
     result = page.evaluate("""
     async () => {
 
-        const res = await fetch("https://login.tailscale.com/admin/api/keys", {
+        const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
             method: "POST",
             headers: {
                 "content-type": "application/json",
