@@ -144,7 +144,7 @@ def delete_old_keys(page):
     }
     """)
 
-
+    log(data)
     keys = data["data"]["authKeys"]
 
     log(f"发现 {len(keys)} 个 Key")
