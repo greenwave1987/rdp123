@@ -139,13 +139,13 @@ def delete_old_keys(page):
 
     data = page.evaluate("""
     async () => {
-        const r = await fetch("https://login.tailscale.com/admin/api/keys");
+        const r = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true");
         return await r.json();
     }
     """)
 
     log(data)
-    keys = data["data"]["authKeys"]
+    keys = data["data"]["keys"]
 
     log(f"发现 {len(keys)} 个 Key")
 
