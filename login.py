@@ -144,7 +144,7 @@ def delete_old_keys(page):
     }
     """)
 
-    log(data)
+    ##log(data)
     keys = data["data"]["keys"]
 
     log(f"发现 {len(keys)} 个 Key")
@@ -219,7 +219,7 @@ def create_authkey(page):
         raise Exception("Tailscale API 请求未成功")
 
     # 2. 打印完整的返回结构，方便定位键名
-    log(f"完整返回数据: {result}")
+    ##log(f"完整返回数据: {result}")
 
     # 3. 安全地尝试多种可能的键名
     try:
