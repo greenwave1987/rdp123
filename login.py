@@ -202,7 +202,7 @@ def create_authkey(page):
         return await res.json();
     }
     """)
-
+    log(result)
     key = result["data"]["fullKey"]
 
     log(f"新 AuthKey: {mask_key(key)}")
