@@ -165,3 +165,12 @@ jobs:
           try { & "$env:TAILSCALE_BIN" logout } catch {}
           Get-Process -Name "mihomo" -ErrorAction SilentlyContinue | Stop-Process -Force
           Remove-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue
+          
+      - name: 🧹 清理旧的工作流运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 3
