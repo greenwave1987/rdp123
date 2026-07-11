@@ -175,42 +175,67 @@ def create_authkey(page):
 
     result = page.evaluate("""
     async () => {
-        const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
-            method: "POST",
-            headers: {
-                "accept": "application/json, text/plain, */*",
-                "content-type": "application/json",
-                "sec-fetch-site": "same-origin",
-                "referer": "https://login.tailscale.com/admin/settings/keys"
-            },
-            body: JSON.stringify({
-                keyType: "auth",
-                description: "auto-rotated",
-                expirySeconds: 7776000,
-                capabilities: {
-                    devices: {
-                        create: {
-                            ephemeral: true,
-                            reusable: true,
-                            preauthorized: false,
-                            tags: ["tag:github"]
+        try {
+            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
+                method: "POST",
+                headers: {
+                    "accept": "application/json, text/plain, */*",
+                    "content-type": "application/json",
+                    "sec-fetch-site": "same-origin",
+                    "referer": "https://login.tailscale.com/admin/settings/keys"
+                },
+                body: JSON.stringify({
+                    keyType: "auth",
+                    description: "auto-rotated",
+                    expirySeconds: 7776000,
+                    capabilities: {
+                        devices: {
+                            create: {
+                                ephemeral: true,
+                                reusable: true,
+                                preauthorized: false,
+                                tags: ["tag:github"]
+                            }
                         }
                     }
-                }
-            })
-        });
-
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
+                })
+            });
+            
+            // 如果 HTTP 状态码不是 2xx，把状态码和文本一起返回给 Python
+            if (!res.ok) {
+                return { _is_error: true, status: res.status, text: await res.text() };
+            }
+            
+            return await res.json();
+        } catch (e) {
+            return { _is_error: true, status: "FetchException", text: e.message };
         }
-        return await res.json();
     }
     """)
 
-    # 提取生成的 key
-    key = result["data"]["Key"]
-    log(f"新 AuthKey: {mask_key(key)}")
-    return key
+    # 1. 拦截网络或权限错误
+    if isinstance(result, dict) and result.get("_is_error"):
+        log(f"❌ 接口请求失败！状态码: {result['status']}, 错误内容: {result['text']}")
+        raise Exception("Tailscale API 请求未成功")
+
+    # 2. 打印完整的返回结构，方便定位键名
+    log(f"完整返回数据: {result}")
+
+    # 3. 安全地尝试多种可能的键名
+    try:
+        data = result.get("data", {})
+        # 尝试获取 fullKey, 其次是 key, 再次是整个对象里的 key
+        key = data.get("fullKey") or data.get("key") or result.get("key")
+        
+        if not key:
+            raise KeyError("在返回结果中找不到任何有效的 Key 字段")
+            
+        log(f"新 AuthKey: {mask_key(key)}")
+        return key
+
+    except Exception as e:
+        log(f"❌ 解析 Key 时发生异常: {str(e)}")
+        raise
         
 def jcreate_authkey(page):
 
