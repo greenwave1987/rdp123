@@ -119,3 +119,13 @@ jobs:
           }
           
           Write-Host "设定时长已到，正在自动关闭任务..."
+
+                    
+      - name: 🧹 清理旧的工作流运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 3
