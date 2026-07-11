@@ -170,8 +170,59 @@ def delete_old_keys(page):
 
     log(f"已删除 {deleted} 个旧 Key")
 
-
 def create_authkey(page):
+    log("创建新的 AuthKey")
+    
+    # 可以在这里先尝试获取当前的 CSRF Token（如果 Tailscale 校验该字段的话）
+    result = page.evaluate("""
+    async () => {
+        const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "referer": "https://login.tailscale.com/admin/settings/keys"
+                // 如果报错 403，可能需要加上这行（需要提前获取 token）
+                // "x-csrf-token": window._csrf_token 
+            },
+            body: JSON.stringify({
+                keyData: {
+                    type: "auth",
+                    description: "auto-rotated",
+                    expirySeconds: 7776000,
+                    capabilities: {
+                        devices: {
+                            create: {
+                                ephemeral: true,
+                                reusable: true,
+                                preauthorized: false,
+                                tags: ["tag:github"]
+                            }
+                        }
+                    }
+                }
+            })
+        });
+
+        if (!res.ok) {
+            return { error: true, status: res.status, text: await res.text() };
+        }
+        return await res.json();
+    }
+    """)
+
+    if isinstance(result, dict) and result.get("error"):
+        log(f"创建 AuthKey 失败: 状态码 {result['status']}, 详情: {result['text']}")
+        raise Exception("Tailscale API 调用失败")
+
+    try:
+        key = result["data"]["Key"]
+        log(f"新 AuthKey: {mask_key(key)}")
+        return key
+    except KeyError:
+        log(f"返回数据结构异常: {result}")
+        raise
+        
+def jcreate_authkey(page):
 
     log("创建新的 AuthKey")
 
@@ -189,12 +240,18 @@ def create_authkey(page):
                     type:"auth",
                     description:"auto-rotated",
                     expirySeconds:7776000,
-                    authkey:{
-                        ephemeral:true,
-                        reusable:true,
-                        preauthorized:false,
-                        tags:["tag:github"]
-                    }
+                    "capabilities": {
+                		"devices": {
+                			"create": {
+                                        ephemeral:true,
+                                        reusable:true,
+                                        preauthorized:false,
+                                        tags:["tag:github"]
+                                    }
+                                }
+                    		}
+            			}
+            		}
                 }
             })
         });
@@ -202,8 +259,8 @@ def create_authkey(page):
         return await res.json();
     }
     """)
-    log(result)
-    key = result["data"]["fullKey"]
+
+    key = result["data"]["Key"]
 
     log(f"新 AuthKey: {mask_key(key)}")
 
