@@ -135,11 +135,11 @@ def delete_old_keys(context):
             return
         keys = data.get("data", {}).get("keys", [])
         log(keys)
-        active_keys = [k for k in keys if not k.get("invalid") and not k.get("revoked")]
+        active_keys = keys.filter(k => !k.invalid && !k.revoked);
         ids_to_delete = [k.get("id") for k in active_keys if k.get("id")]
 
         if not ids_to_delete:
-            log(f"发现 {len(keys)} 个 Key，成功删除/撤销 0 个活跃 Key")
+            log(f"发现 {len(keys)} 个 Key，无活跃 Key")
             return
 
         deleted_count = 0
