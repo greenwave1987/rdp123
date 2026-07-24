@@ -144,32 +144,36 @@ def delete_old_keys(page):
     }
     """)
 
-    log(data)
+    
     log(f"当前URL: {page.url}")
-    keys = data["data"]["keys"]
-
-    log(f"发现 {len(keys)} 个 Key")
-
-    deleted = 0
-
-    for k in keys:
-
-        key_id = k.get("id")
-
-        if not key_id:
-            continue
-
-        page.evaluate(f"""
-        async () => {{
-            await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys/{key_id}", {{
-                method:"DELETE"
-            }});
-        }}
-        """)
-
-        deleted += 1
-
-    log(f"已删除 {deleted} 个旧 Key")
+    if(data["data"]):
+    ##{'status': 'error', 'error': 'forbidden - not logged in'}
+        keys = data["data"]["keys"]
+    
+        log(f"发现 {len(keys)} 个 Key")
+    
+        deleted = 0
+    
+        for k in keys:
+    
+            key_id = k.get("id")
+    
+            if not key_id:
+                continue
+    
+            page.evaluate(f"""
+            async () => {{
+                await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys/{key_id}", {{
+                    method:"DELETE"
+                }});
+            }}
+            """)
+    
+            deleted += 1
+    
+        log(f"已删除 {deleted} 个旧 Key")
+    else:
+        log(data)
 
 def create_authkey(page):
     log("创建新的 AuthKey")
