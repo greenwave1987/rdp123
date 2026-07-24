@@ -111,24 +111,19 @@ def load_state(browser):
 def delete_old_keys(page):
     log("获取并清理旧 AuthKeys...")
 
-    # 确保当前页面在 console.tailscale.com 域名下
-    if "console.tailscale.com" not in page.url:
-        page.goto("https://console.tailscale.com/admin/settings/keys", timeout=60000)
-        page.wait_for_load_state("networkidle")
-
+    # 还原你抓包获取的绝对路径请求
     result = page.evaluate("""
     async () => {
         try {
-            const headers = {
-                "accept": "application/json, text/plain, */*",
-                "cache-control": "no-cache",
-                "x-requested-with": "XMLHttpRequest"
-            };
-
-            // 使用 console.tailscale.com 的完整 API 地址
-            const res = await fetch("https://console.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true", {
-                headers: headers,
-                credentials: "include"
+            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true", {
+                headers: {
+                    "accept": "application/json, text/plain, */*",
+                    "cache-control": "no-cache",
+                    "pragma": "no-cache"
+                },
+                referrer: "https://console.tailscale.com/",
+                method: "GET",
+                credentials: "include" // 关键：自动携带 tailcontrol 等 Cookie
             });
 
             const contentType = res.headers.get("content-type") || "";
@@ -151,9 +146,13 @@ def delete_old_keys(page):
             }
 
             const deletePromises = idsToDelete.map(id => 
-                fetch(`https://console.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
+                fetch(`https://login.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
                     method: "DELETE",
-                    headers: headers,
+                    headers: {
+                        "accept": "application/json, text/plain, */*",
+                        "cache-control": "no-cache"
+                    },
+                    referrer: "https://console.tailscale.com/",
                     credentials: "include"
                 })
                 .then(r => r.ok)
@@ -183,22 +182,22 @@ def delete_old_keys(page):
 def create_authkey(page):
     log("创建新的 AuthKey")
 
+    # 还原带 keyType 的完整 Payload 抓包数据
     result = page.evaluate("""
     async () => {
         try {
-            // 请求 console.tailscale.com 的 API 端点
-            const res = await fetch("https://console.tailscale.com/admin/api/public/tailnet/-/keys", {
+            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
                 method: "POST",
                 headers: {
                     "accept": "application/json, text/plain, */*",
                     "content-type": "application/json",
-                    "cache-control": "no-cache",
-                    "x-requested-with": "XMLHttpRequest"
+                    "cache-control": "no-cache"
                 },
+                referrer: "https://console.tailscale.com/",
                 credentials: "include",
                 body: JSON.stringify({
                     "keyType": "auth",
-                    "description": "auto-generated-key",
+                    "description": "auto-generated",
                     "expirySeconds": 7776000,
                     "capabilities": {
                         "devices": {
@@ -242,6 +241,7 @@ def create_authkey(page):
 
     log(f"新 AuthKey: {mask_key(key)}")
     return key
+
 
 def encrypt_secret(public_key, secret):
     pk = public.PublicKey(public_key.encode(), encoding.Base64Encoder())
@@ -309,7 +309,7 @@ def main():
 
             save_state(context)
 
-            # 统一跳转至控制台 Keys 页面，确保后续使用的相对路径绝对正确
+            # 保持在控制台 Key 页面执行 fetch（保证 Referer 为 console.tailscale.com）
             page.goto('https://console.tailscale.com/admin/settings/keys', timeout=60000)
             page.wait_for_load_state("networkidle")
 
