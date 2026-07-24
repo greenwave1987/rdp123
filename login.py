@@ -118,16 +118,13 @@ def delete_old_keys(page):
     result = page.evaluate("""
     async () => {
         try {
-            const commonHeaders = {
-                "accept": "application/json, text/plain, */*",
-                "cache-control": "no-cache"
-            };
-
-            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true", {
-                headers: commonHeaders,
-                referrer: "https://console.tailscale.com/",
-                method: "GET",
-                credentials: "include" // 必须显式携带 Cookie
+            // 使用相对路径，发起同源请求
+            const res = await fetch("/admin/api/public/tailnet/-/keys?includeInvalid=true", {
+                headers: {
+                    "accept": "application/json, text/plain, */*",
+                    "cache-control": "no-cache"
+                },
+                credentials: "include"
             });
 
             const contentType = res.headers.get("content-type") || "";
@@ -142,7 +139,6 @@ def delete_old_keys(page):
             }
 
             const keys = data.data?.keys || [];
-            // 过滤：仅清理尚未失效或撤销的 Key
             const activeKeys = keys.filter(k => !k.invalid && !k.revoked);
             const idsToDelete = activeKeys.map(k => k.id).filter(Boolean);
 
@@ -150,11 +146,13 @@ def delete_old_keys(page):
                 return { success: true, totalFound: keys.length, deletedCount: 0 };
             }
 
+            // 同源 DELETE 请求
             const deletePromises = idsToDelete.map(id => 
-                fetch(`https://login.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
+                fetch(`/admin/api/public/tailnet/-/keys/${id}`, {
                     method: "DELETE",
-                    headers: commonHeaders,
-                    referrer: "https://console.tailscale.com/",
+                    headers: {
+                        "accept": "application/json, text/plain, */*"
+                    },
                     credentials: "include"
                 })
                 .then(r => r.ok)
@@ -187,15 +185,15 @@ def create_authkey(page):
     result = page.evaluate("""
     async () => {
         try {
-            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
+            // 使用相对路径，发起同源请求
+            const res = await fetch("/admin/api/public/tailnet/-/keys", {
                 method: "POST",
                 headers: {
                     "accept": "application/json, text/plain, */*",
                     "content-type": "application/json",
                     "cache-control": "no-cache"
                 },
-                referrer: "https://console.tailscale.com/",
-                credentials: "include", // 关键修复：携带 Session Cookie
+                credentials: "include",
                 body: JSON.stringify({
                     "capabilities": {
                         "devices": {
@@ -240,7 +238,6 @@ def create_authkey(page):
 
     log(f"新 AuthKey: {mask_key(key)}")
     return key
-
 
 def encrypt_secret(public_key, secret):
     pk = public.PublicKey(public_key.encode(), encoding.Base64Encoder())
