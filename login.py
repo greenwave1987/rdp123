@@ -111,19 +111,21 @@ def load_state(browser):
 def delete_old_keys(page):
     log("获取并清理旧 AuthKeys...")
 
-    # 还原你抓包获取的绝对路径请求
     result = page.evaluate("""
     async () => {
         try {
+            const commonHeaders = {
+                "accept": "application/json, text/plain, */*",
+                "cache-control": "no-cache",
+                "pragma": "no-cache"
+            };
+
+            // 1. 获取列表
             const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true", {
-                headers: {
-                    "accept": "application/json, text/plain, */*",
-                    "cache-control": "no-cache",
-                    "pragma": "no-cache"
-                },
+                headers: commonHeaders,
                 referrer: "https://console.tailscale.com/",
                 method: "GET",
-                credentials: "include" // 关键：自动携带 tailcontrol 等 Cookie
+                credentials: "include"
             });
 
             const contentType = res.headers.get("content-type") || "";
@@ -145,13 +147,11 @@ def delete_old_keys(page):
                 return { success: true, totalFound: keys.length, deletedCount: 0 };
             }
 
+            // 2. 逐个发送 DELETE 请求
             const deletePromises = idsToDelete.map(id => 
                 fetch(`https://login.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
                     method: "DELETE",
-                    headers: {
-                        "accept": "application/json, text/plain, */*",
-                        "cache-control": "no-cache"
-                    },
+                    headers: commonHeaders,
                     referrer: "https://console.tailscale.com/",
                     credentials: "include"
                 })
