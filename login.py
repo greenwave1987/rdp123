@@ -108,140 +108,119 @@ def load_state(browser):
     return browser.new_context()
 
 
-def delete_old_keys(page):
-    log("获取并清理旧 AuthKeys...")
+# ================= requests 核心封装部分 =================
 
-    result = page.evaluate("""
-    async () => {
-        try {
-            const commonHeaders = {
-                "accept": "application/json, text/plain, */*",
-                "cache-control": "no-cache",
-                "pragma": "no-cache"
-            };
+def build_requests_session(context) -> requests.Session:
+    """提取 Playwright Cookies 并配置精确的浏览器伪造 Header"""
+    session = requests.Session()
+    
+    # 提取 Playwright 中的 Cookies 并注入 requests Session
+    cookies = context.cookies()
+    for c in cookies:
+        domain = c.get('domain', '.tailscale.com')
+        session.cookies.set(c['name'], c['value'], domain=domain)
 
-            // 1. 获取列表
-            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true", {
-                headers: commonHeaders,
-                referrer: "https://console.tailscale.com/",
-                method: "GET",
-                credentials: "include"
-            });
+    # 精确匹配浏览器抓包的 Headers
+    session.headers.update({
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
+        "priority": "u=1, i",
+        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "sec-gpc": "1",
+        "Referer": "https://console.tailscale.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+    })
+    return session
 
-            const contentType = res.headers.get("content-type") || "";
-            if (!contentType.includes("application/json")) {
-                const text = await res.text();
-                return { success: false, error: `非 JSON 响应 (HTTP ${res.status}): ${text.slice(0, 100)}` };
+
+def delete_old_keys_requests(session: requests.Session):
+    """使用 requests 查询并删除旧 Key"""
+    log("获取并清理旧 AuthKeys (requests)...")
+    url = "https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true"
+
+    try:
+        res = session.get(url, timeout=15)
+        if res.status_code != 200:
+            log(f"❌ 获取列表失败 (HTTP {res.status_code}): {res.text[:100]}")
+            return
+
+        data = res.json()
+        if data.get("status") != "success":
+            log(f"❌ 获取列表返回异常: {data}")
+            return
+
+        keys = data.get("data", {}).get("keys", [])
+        active_keys = [k for k in keys if not k.get("invalid") and not k.get("revoked")]
+        ids_to_delete = [k.get("id") for k in active_keys if k.get("id")]
+
+        if not ids_to_delete:
+            log(f"发现 {len(keys)} 个 Key，成功删除/撤销 0 个活跃 Key")
+            return
+
+        deleted_count = 0
+        for key_id in ids_to_delete:
+            del_url = f"https://login.tailscale.com/admin/api/public/tailnet/-/keys/{key_id}"
+            del_res = session.delete(del_url, timeout=15)
+            if del_res.status_code == 200:
+                deleted_count += 1
+
+        log(f"发现 {len(keys)} 个 Key，成功删除/撤销 {deleted_count} 个活跃 Key")
+
+    except Exception as e:
+        log(f"❌ 清理旧 Key 异常: {e}")
+
+
+def create_authkey_requests(session: requests.Session) -> str:
+    """使用 requests 创建新 AuthKey"""
+    log("创建新的 AuthKey (requests)...")
+    url = "https://login.tailscale.com/admin/api/public/tailnet/-/keys"
+
+    payload = {
+        "keyType": "auth",
+        "description": "auto-generated",
+        "expirySeconds": 7776000,
+        "capabilities": {
+            "devices": {
+                "create": {
+                    "ephemeral": False,
+                    "reusable": False,
+                    "preauthorized": False,
+                    "tags": []
+                }
             }
-
-            const data = await res.json();
-            if (data.status !== "success") {
-                return { success: false, data };
-            }
-
-            const keys = data.data?.keys || [];
-            const activeKeys = keys.filter(k => !k.invalid && !k.revoked);
-            const idsToDelete = activeKeys.map(k => k.id).filter(Boolean);
-
-            if (idsToDelete.length === 0) {
-                return { success: true, totalFound: keys.length, deletedCount: 0 };
-            }
-
-            // 2. 逐个发送 DELETE 请求
-            const deletePromises = idsToDelete.map(id => 
-                fetch(`https://login.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
-                    method: "DELETE",
-                    headers: commonHeaders,
-                    referrer: "https://console.tailscale.com/",
-                    credentials: "include"
-                })
-                .then(r => r.ok)
-                .catch(() => false)
-            );
-
-            const results = await Promise.all(deletePromises);
-            const deletedCount = results.filter(Boolean).length;
-
-            return {
-                success: true,
-                totalFound: keys.length,
-                deletedCount: deletedCount
-            };
-        } catch (err) {
-            return { success: false, error: err.toString() };
         }
     }
-    """)
 
-    if result.get("success"):
-        log(f"发现 {result['totalFound']} 个 Key，成功删除/撤销 {result['deletedCount']} 个活跃 Key")
-    else:
-        log(f"❌ 清理旧 Key 失败: {result}")
+    try:
+        res = session.post(url, json=payload, timeout=15)
+        if res.status_code != 200:
+            log(f"❌ 创建失败 (HTTP {res.status_code}): {res.text[:150]}")
+            raise Exception("Tailscale API 请求未成功")
+
+        data = res.json()
+        if data.get("status") == "success":
+            key_val = data.get("data", {}).get("key") or data.get("data", {}).get("fullKey")
+            if not key_val:
+                raise KeyError("未查找到有效的 Key 字段")
+            log(f"新 AuthKey: {mask_key(key_val)}")
+            return key_val
+        else:
+            log(f"❌ API 返回错误: {data}")
+            raise Exception("Tailscale AuthKey 生成失败")
+
+    except Exception as e:
+        log(f"❌ 创建 AuthKey 异常: {e}")
+        raise
 
 
-def create_authkey(page):
-    log("创建新的 AuthKey")
-
-    # 还原带 keyType 的完整 Payload 抓包数据
-    result = page.evaluate("""
-    async () => {
-        try {
-            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys", {
-                method: "POST",
-                headers: {
-                    "accept": "application/json, text/plain, */*",
-                    "content-type": "application/json",
-                    "cache-control": "no-cache"
-                },
-                referrer: "https://console.tailscale.com/",
-                credentials: "include",
-                body: JSON.stringify({
-                    "keyType": "auth",
-                    "description": "auto-generated",
-                    "expirySeconds": 7776000,
-                    "capabilities": {
-                        "devices": {
-                            "create": {
-                                "ephemeral": false,
-                                "reusable": false,
-                                "preauthorized": false,
-                                "tags": []
-                            }
-                        }
-                    }
-                })
-            });
-
-            const contentType = res.headers.get("content-type") || "";
-            if (!contentType.includes("application/json")) {
-                const text = await res.text();
-                return { success: false, error: `请求失败 (HTTP ${res.status}): ${text.slice(0, 100)}` };
-            }
-
-            const data = await res.json();
-            if (data.status === "success") {
-                const keyVal = data.data?.key || data.data?.fullKey;
-                return { success: true, key: keyVal };
-            } else {
-                return { success: false, data };
-            }
-        } catch (e) {
-            return { success: false, error: e.toString() };
-        }
-    }
-    """)
-
-    if not result.get("success"):
-        log(f"❌ 创建失败: {result}")
-        raise Exception("Tailscale AuthKey 生成失败")
-
-    key = result.get("key")
-    if not key:
-        raise KeyError("返回数据中未能识别到有效 Key 字符串")
-
-    log(f"新 AuthKey: {mask_key(key)}")
-    return key
-
+# ================= GitHub Secret 更新部分 =================
 
 def encrypt_secret(public_key, secret):
     pk = public.PublicKey(public_key.encode(), encoding.Base64Encoder())
@@ -278,6 +257,8 @@ def update_github_secret(secret_value):
     log("GitHub Secret 更新完成")
 
 
+# ================= 主程序 =================
+
 def main():
     log("启动浏览器")
 
@@ -309,12 +290,16 @@ def main():
 
             save_state(context)
 
-            # 保持在控制台 Key 页面执行 fetch（保证 Referer 为 console.tailscale.com）
+            # 确保控制台 Key 页面加载完成以写入/更新最新的 Session Cookies
             page.goto('https://console.tailscale.com/admin/settings/keys', timeout=60000)
             page.wait_for_load_state("networkidle")
 
-            delete_old_keys(page)
-            authkey = create_authkey(page)
+            # 构建带完整 Cookies 的 requests.Session
+            session = build_requests_session(context)
+
+            # 使用 requests 调用 API
+            delete_old_keys_requests(session)
+            authkey = create_authkey_requests(session)
 
             if authkey:
                 update_github_secret(authkey)
