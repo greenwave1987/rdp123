@@ -146,7 +146,7 @@ def delete_old_keys(page):
 
     
     log(f"当前URL: {page.url}")
-    if(data["data"]):
+    if(data["status"]=="success"):
     ##{'status': 'error', 'error': 'forbidden - not logged in'}
         keys = data["data"]["keys"]
     
