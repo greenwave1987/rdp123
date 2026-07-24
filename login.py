@@ -366,7 +366,7 @@ def main():
 
             save_state(context)
 
-            page.wait_for_url("**login.tailscale.com/admin**", timeout=60000)
+            page.wait_for_url("**console.tailscale.com/admin**", timeout=60000)
 
             delete_old_keys(page)
 
