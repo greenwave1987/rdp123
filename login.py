@@ -133,8 +133,8 @@ def delete_old_keys(context):
         if data.get("status") != "success":
             log(f"❌ 获取列表返回异常: {data}")
             return
-
         keys = data.get("data", {}).get("keys", [])
+        log(keys)
         active_keys = [k for k in keys if not k.get("invalid") and not k.get("revoked")]
         ids_to_delete = [k.get("id") for k in active_keys if k.get("id")]
 
