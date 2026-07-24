@@ -3,7 +3,7 @@ import sys
 import json
 import time
 import base64
-import requests
+import requests  # 仅保留用于 GitHub API 更新
 import pyotp
 from nacl import encoding, public
 from datetime import datetime
@@ -108,47 +108,25 @@ def load_state(browser):
     return browser.new_context()
 
 
-# ================= requests 核心封装部分 =================
+# ================= Playwright Native Request 交互模块 =================
 
-def build_requests_session(context) -> requests.Session:
-    """提取 Playwright Cookies 并配置精确的浏览器伪造 Header"""
-    session = requests.Session()
-    
-    # 提取 Playwright 中的 Cookies 并注入 requests Session
-    cookies = context.cookies()
-    for c in cookies:
-        domain = c.get('domain', '.tailscale.com')
-        session.cookies.set(c['name'], c['value'], domain=domain)
-
-    # 精确匹配浏览器抓包的 Headers
-    session.headers.update({
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-        "cache-control": "no-cache",
-        "pragma": "no-cache",
-        "priority": "u=1, i",
-        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-site",
-        "sec-gpc": "1",
-        "Referer": "https://console.tailscale.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-    })
-    return session
-
-
-def delete_old_keys_requests(session: requests.Session):
-    """使用 requests 查询并删除旧 Key"""
-    log("获取并清理旧 AuthKeys (requests)...")
+def delete_old_keys(context):
+    """使用 Playwright 真实的浏览器 API 上下文获取并清理旧 Key"""
+    log("获取并清理旧 AuthKeys...")
     url = "https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true"
 
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
+        "referer": "https://console.tailscale.com/"
+    }
+
     try:
-        res = session.get(url, timeout=15)
-        if res.status_code != 200:
-            log(f"❌ 获取列表失败 (HTTP {res.status_code}): {res.text[:100]}")
+        # 使用 context.request，享有完全一致的 Chromium 网络栈及 Cookie
+        res = context.request.get(url, headers=headers)
+        if res.status != 200:
+            log(f"❌ 获取列表失败 (HTTP {res.status}): {res.text()[:100]}")
             return
 
         data = res.json()
@@ -167,8 +145,8 @@ def delete_old_keys_requests(session: requests.Session):
         deleted_count = 0
         for key_id in ids_to_delete:
             del_url = f"https://login.tailscale.com/admin/api/public/tailnet/-/keys/{key_id}"
-            del_res = session.delete(del_url, timeout=15)
-            if del_res.status_code == 200:
+            del_res = context.request.delete(del_url, headers=headers)
+            if del_res.ok:
                 deleted_count += 1
 
         log(f"发现 {len(keys)} 个 Key，成功删除/撤销 {deleted_count} 个活跃 Key")
@@ -177,10 +155,17 @@ def delete_old_keys_requests(session: requests.Session):
         log(f"❌ 清理旧 Key 异常: {e}")
 
 
-def create_authkey_requests(session: requests.Session) -> str:
-    """使用 requests 创建新 AuthKey"""
-    log("创建新的 AuthKey (requests)...")
+def create_authkey(context) -> str:
+    """使用 Playwright 真实的浏览器 API 上下文创建新 AuthKey"""
+    log("创建新的 AuthKey...")
     url = "https://login.tailscale.com/admin/api/public/tailnet/-/keys"
+
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "content-type": "application/json",
+        "cache-control": "no-cache",
+        "referer": "https://console.tailscale.com/"
+    }
 
     payload = {
         "keyType": "auth",
@@ -199,9 +184,9 @@ def create_authkey_requests(session: requests.Session) -> str:
     }
 
     try:
-        res = session.post(url, json=payload, timeout=15)
-        if res.status_code != 200:
-            log(f"❌ 创建失败 (HTTP {res.status_code}): {res.text[:150]}")
+        res = context.request.post(url, headers=headers, data=payload)
+        if res.status != 200:
+            log(f"❌ 创建失败 (HTTP {res.status}): {res.text()[:150]}")
             raise Exception("Tailscale API 请求未成功")
 
         data = res.json()
@@ -290,16 +275,13 @@ def main():
 
             save_state(context)
 
-            # 确保控制台 Key 页面加载完成以写入/更新最新的 Session Cookies
+            # 跳转至 Key 页面确保 LocalStorage 与特定域 Cookie 准备完毕
             page.goto('https://console.tailscale.com/admin/settings/keys', timeout=60000)
             page.wait_for_load_state("networkidle")
 
-            # 构建带完整 Cookies 的 requests.Session
-            session = build_requests_session(context)
-
-            # 使用 requests 调用 API
-            delete_old_keys_requests(session)
-            authkey = create_authkey_requests(session)
+            # 使用 context（底层 Chromium 引擎）发起请求，完美避开 Sec-Fetch 指纹校验
+            delete_old_keys(context)
+            authkey = create_authkey(context)
 
             if authkey:
                 update_github_secret(authkey)
