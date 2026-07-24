@@ -145,6 +145,7 @@ def delete_old_keys(page):
     """)
 
     log(data)
+    log(f"当前URL: {page.url}")
     keys = data["data"]["keys"]
 
     log(f"发现 {len(keys)} 个 Key")
@@ -361,16 +362,14 @@ def main():
                 handle_oauth(page)
 
             page.wait_for_url("**tailscale.com/**", timeout=120000)
-            page.goto('https://console.tailscale.com/admin/settings/keys', timeout=60000)
-
-            log(f"当前URL: {page.url}")
+            
             log("登录成功")
             
 
             save_state(context)
 
             page.wait_for_url("**console.tailscale.com/admin**", timeout=60000)
-
+            page.goto('https://console.tailscale.com/admin/settings/keys', timeout=60000)
             delete_old_keys(page)
 
             authkey = create_authkey(page)
