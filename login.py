@@ -361,8 +361,11 @@ def main():
                 handle_oauth(page)
 
             page.wait_for_url("**tailscale.com/**", timeout=120000)
+            page.goto('https://console.tailscale.com/admin/settings/keys', timeout=60000)
 
+            log(f"当前URL: {page.url}")
             log("登录成功")
+            
 
             save_state(context)
 
