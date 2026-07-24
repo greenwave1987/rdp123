@@ -134,46 +134,50 @@ def load_state(browser):
 
 
 def delete_old_keys(page):
+    log("获取并清理旧 AuthKeys...")
 
-    log("获取旧 AuthKeys")
-
-    data = page.evaluate("""
+    # 将获取、循环、删除全部交由浏览器端并行处理
+    result = page.evaluate("""
     async () => {
-        const r = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true");
-        return await r.json();
+        try {
+            // 1. 获取 keys
+            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true");
+            const data = await res.json();
+
+            if (data.status !== "success") {
+                return { success: false, data };
+            }
+
+            const keys = data.data?.keys || [];
+            const validIds = keys.map(k => k.id).filter(Boolean);
+
+            // 2. 并行发送 DELETE 请求
+            const deletePromises = validIds.map(id => 
+                fetch(`https://login.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
+                    method: "DELETE"
+                }).then(r => r.ok)
+            );
+
+            const results = await Promise.all(deletePromises);
+            const deletedCount = results.filter(Boolean).length;
+
+            return {
+                success: true,
+                totalFound: keys.length,
+                deletedCount: deletedCount
+            };
+        } catch (err) {
+            return { success: false, error: err.toString() };
+        }
     }
     """)
 
-    
     log(f"当前URL: {page.url}")
-    if(data["status"]=="success"):
-    ##{'status': 'error', 'error': 'forbidden - not logged in'}
-        keys = data["data"]["keys"]
-    
-        log(f"发现 {len(keys)} 个 Key")
-    
-        deleted = 0
-    
-        for k in keys:
-    
-            key_id = k.get("id")
-    
-            if not key_id:
-                continue
-    
-            page.evaluate(f"""
-            async () => {{
-                await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys/{key_id}", {{
-                    method:"DELETE"
-                }});
-            }}
-            """)
-    
-            deleted += 1
-    
-        log(f"已删除 {deleted} 个旧 Key")
+
+    if result.get("success"):
+        log(f"发现 {result['totalFound']} 个 Key，成功删除 {result['deletedCount']} 个旧 Key")
     else:
-        log(data)
+        log(f"操作失败: {result}")
 
 def create_authkey(page):
     log("创建新的 AuthKey")
