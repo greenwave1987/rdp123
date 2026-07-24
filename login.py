@@ -136,12 +136,23 @@ def load_state(browser):
 def delete_old_keys(page):
     log("获取并清理旧 AuthKeys...")
 
-    # 将获取、循环、删除全部交由浏览器端并行处理
+    # 1. 确保当前页面在 admin 域名下
+    if "tailscale.com/admin" not in page.url:
+        page.goto("https://console.tailscale.com/admin/settings/keys")
+        page.wait_for_load_state("networkidle")
+
+    # 2. 执行浏览器端清理逻辑
     result = page.evaluate("""
     async () => {
         try {
-            // 1. 获取 keys
-            const res = await fetch("https://login.tailscale.com/admin/api/public/tailnet/-/keys?includeInvalid=true");
+            // 使用相对路径，自动继承 console.tailscale.com 下的 Session Cookie
+            const res = await fetch("/admin/api/public/tailnet/-/keys?includeInvalid=true", {
+                headers: {
+                    "Accept": "application/json",
+                },
+                credentials: "include" // 强制带上 Cookie
+            });
+            
             const data = await res.json();
 
             if (data.status !== "success") {
@@ -151,10 +162,11 @@ def delete_old_keys(page):
             const keys = data.data?.keys || [];
             const validIds = keys.map(k => k.id).filter(Boolean);
 
-            // 2. 并行发送 DELETE 请求
+            // 并行发送 DELETE 请求（同样使用相对路径）
             const deletePromises = validIds.map(id => 
-                fetch(`https://login.tailscale.com/admin/api/public/tailnet/-/keys/${id}`, {
-                    method: "DELETE"
+                fetch(`/admin/api/public/tailnet/-/keys/${id}`, {
+                    method: "DELETE",
+                    credentials: "include"
                 }).then(r => r.ok)
             );
 
