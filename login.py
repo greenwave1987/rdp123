@@ -109,25 +109,29 @@ def load_state(browser):
 
 
 def build_requests_session(context) -> requests.Session:
-    """从 Playwright Context 提取 Cookie，构建 requests.Session 实例"""
     session = requests.Session()
     
-    # 导出 Playwright 中的 Cookies 并注入 requests Session
+    # 注入 Playwright 的 Cookies
     cookies = context.cookies()
     for cookie in cookies:
         session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain'))
 
-    # 设置常用的浏览器 Headers
+    # 与浏览器完全一致的 Headers 结构
     session.headers.update({
         "accept": "application/json, text/plain, */*",
         "accept-language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
         "cache-control": "no-cache",
         "pragma": "no-cache",
+        "priority": "u=1, i",
+        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-site",
+        "sec-fetch-site": "same-site",  # console -> login 属于 same-site
+        "sec-gpc": "1",
         "Referer": "https://console.tailscale.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
     })
     return session
 
@@ -169,31 +173,33 @@ def delete_old_keys(session: requests.Session):
     except Exception as e:
         log(f"❌ 清理旧 Key 时出现异常: {e}")
 
-
 def create_authkey(session: requests.Session):
     log("创建新的 AuthKey")
 
     url = "https://login.tailscale.com/admin/api/public/tailnet/-/keys"
     
+    # 补充 keyType 字段与匹配的属性
     payload = {
+        "keyType": "auth",
+        "description": "auto-generated",
+        "expirySeconds": 7776000,
         "capabilities": {
             "devices": {
                 "create": {
-                    "reusable": True,
-                    "ephemeral": True,
+                    "ephemeral": True,       # 可根据需要保持 True 或 False
+                    "reusable": True,        # 可根据需要保持 True 或 False
                     "preauthorized": False,
-                    "tags": ["tag:github"]
+                    "tags": ["tag:github"]   # 如果不需要 Tag 可传 []
                 }
             }
-        },
-        "expirySeconds": 7776000
+        }
     }
 
     try:
         res = session.post(url, json=payload, timeout=15)
         
         if res.status_code != 200:
-            log(f"❌ 创建接口请求失败！状态码: {res.status_code}, 内容: {res.text[:100]}")
+            log(f"❌ 创建接口请求失败！状态码: {res.status_code}, 内容: {res.text[:150]}")
             raise Exception("Tailscale API 请求未成功")
 
         data = res.json()
@@ -211,7 +217,6 @@ def create_authkey(session: requests.Session):
     except Exception as e:
         log(f"❌ 创建 AuthKey 异常: {e}")
         raise
-
 
 def encrypt_secret(public_key, secret):
     pk = public.PublicKey(public_key.encode(), encoding.Base64Encoder())
