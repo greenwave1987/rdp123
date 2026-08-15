@@ -40,7 +40,7 @@ jobs:
           docker logs --tail 100 nz-hug
 
       - name: 保持运行
-        run: sleep 30
+        run: sleep 1500
 
       - name: 清理容器
         if: always()
