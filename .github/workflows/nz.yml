@@ -1,10 +1,10 @@
-name: NZ-HUG 临时部署
+name: NZ 临时部署
 
 on:
   workflow_dispatch:
 
   repository_dispatch:
-    types: [open_rdp]
+    types: [open_nz]
     
 jobs:
   deploy:
