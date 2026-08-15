@@ -13,7 +13,7 @@ jobs:
         env:
           ARGO_AUTH: ${{ secrets.ARGO_AUTH }}
           ARGO_DOMAIN: ${{ secrets.ARGO_DOMAIN }}
-          GITHUB_TOKEN: ${{ secrets.NZ_GITHUB_TOKEN }}
+          GT_TOKEN: ${{ secrets.GT_TOKEN }}
           ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
         run: |
           docker pull ghcr.io/greenwave1987/nz-hug:latest
@@ -23,7 +23,7 @@ jobs:
             --restart no \
             -e ARGO_AUTH="$ARGO_AUTH" \
             -e ARGO_DOMAIN="$ARGO_DOMAIN" \
-            -e GITHUB_TOKEN="$GITHUB_TOKEN" \
+            -e GITHUB_TOKEN="$GT_TOKEN" \
             -e GITHUB_REPO_OWNER="greenwave1987" \
             -e GITHUB_REPO_NAME="nezha-backup" \
             -e GITHUB_BRANCH="main" \
