@@ -1,0 +1,45 @@
+name: NZ-HUG 临时部署
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 拉取并启动 Docker
+        env:
+          ARGO_AUTH: ${{ secrets.ARGO_AUTH }}
+          ARGO_DOMAIN: ${{ secrets.ARGO_DOMAIN }}
+          GITHUB_TOKEN: ${{ secrets.NZ_GITHUB_TOKEN }}
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          docker pull ghcr.io/greenwave1987/nz-hug:latest
+          docker rm -f nz-hug 2>/dev/null || true
+          docker run -d \
+            --name nz-hug \
+            --restart no \
+            -e ARGO_AUTH="$ARGO_AUTH" \
+            -e ARGO_DOMAIN="$ARGO_DOMAIN" \
+            -e GITHUB_TOKEN="$GITHUB_TOKEN" \
+            -e GITHUB_REPO_OWNER="greenwave1987" \
+            -e GITHUB_REPO_NAME="nezha-backup" \
+            -e GITHUB_BRANCH="main" \
+            -e ZIP_PASSWORD="$ZIP_PASSWORD" \
+            -e NZ_UUID="97763ed1-dcc0-23da-d309-a4ae993d1b88" \
+            ghcr.io/greenwave1987/nz-hug:latest
+
+      - name: 查看容器状态
+        run: |
+          docker ps -a
+          docker logs --tail 100 nz-hug
+
+      - name: 保持运行
+        run: sleep 1500
+
+      - name: 清理容器
+        if: always()
+        run: |
+          docker rm -f nz-hug 2>/dev/null || true
