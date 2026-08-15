@@ -2,14 +2,22 @@ name: NZ 临时部署
 
 on:
   workflow_dispatch:
+    inputs:
+      duration:
+        description: "运行时间（分钟）"
+        required: false
+        default: "25"
 
   repository_dispatch:
     types: [open_nz]
-    
+
+env:
+  DEFAULT_DURATION_MIN: 25
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
 
     steps:
       - name: 拉取并启动 Docker
@@ -40,7 +48,30 @@ jobs:
           docker logs --tail 100 nz-hug
 
       - name: 保持运行
-        run: sleep 1500
+        shell: pwsh
+        run: |
+          $raw = "${{ github.event.client_payload.duration }}"
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+              $raw = "${{ github.event.inputs.duration }}"
+          }
+
+          $min = if ([string]::IsNullOrWhiteSpace($raw) -or -not [int]::TryParse($raw, [ref]$null)) {
+              [int]$env:DEFAULT_DURATION_MIN
+          } else {
+              [int]$raw
+          }
+
+          $min = [Math]::Min($min, 355)
+          $endTime = (Get-Date).AddMinutes($min)
+
+          Write-Host "⏳ 保持运行 $min 分钟"
+          Write-Host "⏰ 结束时间: $endTime"
+
+          while ((Get-Date) -lt $endTime) {
+              $rem = [int]($endTime - (Get-Date)).TotalMinutes
+              Write-Host "$(Get-Date -Format 'HH:mm:ss') 剩余 $rem 分钟"
+              Start-Sleep 120
+          }
 
       - name: 清理容器
         if: always()
