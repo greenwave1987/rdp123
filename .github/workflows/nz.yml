@@ -77,3 +77,12 @@ jobs:
         if: always()
         run: |
           docker rm -f nz-hug 2>/dev/null || true
+          
+      - name: 🧹 清理旧的工作流运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 3
