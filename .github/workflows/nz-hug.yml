@@ -3,6 +3,9 @@ name: NZ-HUG 临时部署
 on:
   workflow_dispatch:
 
+  repository_dispatch:
+    types: [open_rdp]
+    
 jobs:
   deploy:
     runs-on: ubuntu-latest
