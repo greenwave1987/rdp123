@@ -40,6 +40,7 @@ jobs:
             -e GITHUB_BRANCH="main" \
             -e ZIP_PASSWORD="$ZIP_PASSWORD" \
             -e NZ_UUID="97763ed1-dcc0-23da-d129-a4ae993d1b88" \
+            -e DASHBOARD_VERSION="1.14.4" \
             ghcr.io/greenwave1987/gt_nz:latest
 
       - name: 查看容器状态
