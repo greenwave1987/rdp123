@@ -47,6 +47,16 @@ jobs:
           docker ps -a
           docker logs --tail 100 nz-hug
 
+      - name: 持续打印容器日志
+        run: |
+          docker logs -f nz-hug &
+          LOG_PID=$!
+          trap 'kill $LOG_PID 2>/dev/null || true' EXIT
+
+          while docker inspect -f '{{.State.Running}}' nz-hug 2>/dev/null | grep -q true; do
+            sleep 10
+          done
+
       - name: 保持运行
         shell: pwsh
         run: |
