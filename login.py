@@ -234,7 +234,7 @@ def create_authkey_requests(session: requests.Session) -> str:
             "devices": {
                 "create": {
                     "ephemeral": False,
-                    "reusable": False,
+                    "reusable": True,
                     "preauthorized": False,
                     "tags": [],
                 }
