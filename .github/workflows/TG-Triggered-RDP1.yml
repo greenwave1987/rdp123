@@ -13,7 +13,7 @@ env:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
 
     steps:
       # ── 1. 启用 RDP ──────────────────────────────────────────────────────
