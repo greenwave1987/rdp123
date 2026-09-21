@@ -163,7 +163,7 @@ jobs:
         if: always()
         shell: pwsh
         env:
-          TS_API_KEY: ${{ secrets.TAILSCALE_AUTH_KEY  }}
+          TS_API_KEY: ${{ secrets.TAILSCALE_API_KEY  }}
         run: |
           Write-Host "🧹 开始清理..."
 
@@ -238,7 +238,7 @@ jobs:
               }
           }
           else {
-              Write-Warning "⚠️ 未设置 TAILSCALE_AUTH_KEY ，跳过 Tailscale 设备删除"
+              Write-Warning "⚠️ 未设置 TAILSCALE_API_KEY ，跳过 Tailscale 设备删除"
           }
           
       - name: 🧹 清理旧的工作流运行记录
