@@ -158,13 +158,88 @@ jobs:
           }
 
       # ── 7. 清理 ──────────────────────────────────────────────────────────
+            # ── 7. 清理 ──────────────────────────────────────────────────────────
       - name: Cleanup
         if: always()
         shell: pwsh
+        env:
+          TS_API_KEY: ${{ secrets.TAILSCALE_API_KEY }}
         run: |
-          try { & "$env:TAILSCALE_BIN" logout } catch {}
-          Get-Process -Name "mihomo" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Write-Host "🧹 开始清理..."
+
+          # 1. 退出当前 Tailscale
+          try {
+              & "$env:TAILSCALE_BIN" logout
+              Write-Host "✅ Tailscale logout 完成"
+          } catch {
+              Write-Warning "⚠️ Tailscale logout 失败"
+          }
+
+          # 2. 停止 Mihomo
+          Get-Process -Name "mihomo" -ErrorAction SilentlyContinue |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+
+          # 3. 删除 RDP 用户
           Remove-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue
+
+          # 4. 删除 Tailscale 中 name 包含 rdp 的设备
+          if (-not [string]::IsNullOrWhiteSpace($env:TS_API_KEY)) {
+
+              Write-Host "🔍 查询 Tailscale 设备..."
+
+              try {
+                  $headers = @{
+                      Authorization = "Bearer $env:TS_API_KEY"
+                  }
+
+                  $url = "https://api.tailscale.com/api/v2/tailnet/-/devices"
+
+                  $response = Invoke-RestMethod `
+                      -Uri $url `
+                      -Headers $headers `
+                      -Method Get
+
+                  $devices = @($response.devices)
+
+                  foreach ($device in $devices) {
+
+                      $name = [string]$device.name
+
+                      # 不区分大小写，匹配包含 rdp
+                      if ($name -match '(?i)rdp') {
+
+                          Write-Host "🎯 找到 RDP 设备:"
+                          Write-Host "   Name: $name"
+                          Write-Host "   ID:   $($device.id)"
+                          Write-Host "   Host: $($device.hostname)"
+
+                          $deleteUrl = "https://api.tailscale.com/api/v2/device/$($device.id)"
+
+                          try {
+                              Invoke-RestMethod `
+                                  -Uri $deleteUrl `
+                                  -Headers $headers `
+                                  -Method Delete
+
+                              Write-Host "✅ 已删除: $name"
+                          }
+                          catch {
+                              Write-Warning "❌ 删除失败: $name"
+                              Write-Warning $_.Exception.Message
+                          }
+                      }
+                  }
+
+                  Write-Host "🧹 Tailscale RDP 设备清理完成"
+              }
+              catch {
+                  Write-Warning "❌ 获取 Tailscale 设备失败"
+                  Write-Warning $_.Exception.Message
+              }
+          }
+          else {
+              Write-Warning "⚠️ 未设置 TAILSCALE_API_KEY，跳过 Tailscale 设备删除"
+          }
           
       - name: 🧹 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
