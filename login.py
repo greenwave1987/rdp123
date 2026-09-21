@@ -16,7 +16,7 @@ Tailscale AuthKey + API Key 自动轮换脚本
     GH_TOTP
     GH_TOKEN
     GH_REPO
-    SECRET_NAME
+    AUTH_SECRET_NAME
 可选：
     API_SECRET_NAME
 依赖：
@@ -40,8 +40,8 @@ GH_PASS = os.getenv("GH_PASS")
 GH_TOTP = os.getenv("GH_TOTP")
 GH_TOKEN = os.getenv("GH_TOKEN")
 GH_REPO = os.getenv("GH_REPO")
-SECRET_NAME = os.getenv("SECRET_NAME")
-API_SECRET_NAME = os.getenv("API_SECRET_NAME", "TAILSCALE_API_KEY")
+AUTH_SECRET_NAME = os.getenv("AUTH_SECRET_NAME")
+API_SECRET_NAME = os.getenv("API_SECRET_NAME")
 KEY_EXPIRY_SECONDS = 7776000
 REQUIRED_ENV_VARS = [
     "GH_USER",
@@ -49,7 +49,7 @@ REQUIRED_ENV_VARS = [
     "GH_TOTP",
     "GH_TOKEN",
     "GH_REPO",
-    "SECRET_NAME",
+    "AUTH_SECRET_NAME",
 ]
 def log(msg: str):
     now = datetime.now().strftime("%H:%M:%S")
@@ -62,7 +62,7 @@ def check_env():
         sys.exit(1)
     log("✅ 环境变量检查通过")
     log(f"GitHub 仓库: {GH_REPO}")
-    log(f"AuthKey Secret: {SECRET_NAME}")
+    log(f"AuthKey Secret: {AUTH_SECRET_NAME}")
     log(f"API Key Secret: {API_SECRET_NAME}")
 def mask_key(key: str) -> str:
     if not key or len(key) < 10:
@@ -361,8 +361,8 @@ def main():
             http_session = build_requests_session(context)
             delete_old_keys(http_session)
             authkey = create_authkey_requests(http_session)
-            update_github_secret(SECRET_NAME, authkey)
-            log(f"✅ AuthKey 已写入 GitHub Secret: {SECRET_NAME}")
+            update_github_secret(AUTH_SECRET_NAME, authkey)
+            log(f"✅ AuthKey 已写入 GitHub Secret: {AUTH_SECRET_NAME}")
             apikey = create_apikey_requests(http_session)
             update_github_secret(API_SECRET_NAME, apikey)
             log(f"✅ API Key 已写入 GitHub Secret: {API_SECRET_NAME}")
